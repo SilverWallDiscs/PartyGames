@@ -1029,6 +1029,14 @@ public final class PartyGamesManager {
             return;
         }
 
+        // The event dimension is reserved for the minigame. If a previous version
+        // accidentally saved it as the return destination, do not restore the broken
+        // event abilities/coordinates from that snapshot.
+        if (point.dimension == null || point.dimension.equals(EVENT_DIMENSION.identifier().toString())) {
+            recoverPlayerWithoutReturnPoint(server, player, "saved return point targets the event dimension");
+            return;
+        }
+
         ServerLevel destination = null;
         try {
             Identifier dimensionId = Identifier.tryParse(point.dimension);
@@ -1036,14 +1044,11 @@ public final class PartyGamesManager {
                 destination = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimensionId));
             }
         } catch (Exception ignored) {
-            // Fall back to the overworld below.
+            // A malformed or unloaded dimension requires emergency recovery below.
         }
         if (destination == null) {
-            destination = server.overworld();
-            BlockPos spawn = new BlockPos(0, FLOOR_Y, 0);
-            point.x = spawn.getX() + 0.5;
-            point.y = spawn.getY() + 1.0;
-            point.z = spawn.getZ() + 0.5;
+            recoverPlayerWithoutReturnPoint(server, player, "saved return dimension is unavailable: " + point.dimension);
+            return;
         }
 
         player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch, true);
