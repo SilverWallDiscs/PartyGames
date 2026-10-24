@@ -17,19 +17,20 @@ public final class PartyGamesConfig {
     public int joinDurationSeconds = 60;
     public int minimumPlayers = 2;
     public int seatTimeSeconds = 6;
-    public int musicMinSeconds = 20;
-    public int musicMaxSeconds = 60;
+    public int musicMinSeconds = 10;
+    public int musicMaxSeconds = 30;
     public int earlyRatioRounds = 3;
     public int earlySeatPercent = 80;
     public int lateSeatPercent = 50;
-    public int arenaRadius = 10;
+    public int arenaRadius = 12;
     public List<String> musicSounds = new ArrayList<>(List.of(
-            "minecraft:music.game",
-            "minecraft:music.creative",
-            "minecraft:music.end",
-            "minecraft:music.nether.crimson_forest",
-            "minecraft:music.nether.warped_forest",
-            "minecraft:music.nether.soul_sand_valley"
+            "minecraft:music_disc.otherside",
+            "minecraft:music_disc.tears",
+            "minecraft:music_disc.precipice",
+            "minecraft:music_disc.creator",
+            "minecraft:music_disc.pigstep",
+            "minecraft:music_disc.bounce",
+            "minecraft:music_disc.lava_chicken"
     ));
     public Prize first = Prize.defaultFirst();
     public Prize second = Prize.defaultSecond();
@@ -73,15 +74,23 @@ public final class PartyGamesConfig {
         joinDurationSeconds = clamp(joinDurationSeconds, 10, 600);
         minimumPlayers = clamp(minimumPlayers, 2, 200);
         seatTimeSeconds = clamp(seatTimeSeconds, 2, 30);
-        musicMinSeconds = clamp(musicMinSeconds, 20, 600);
-        musicMaxSeconds = clamp(musicMaxSeconds, musicMinSeconds, 600);
+        // Force the requested 10–30 second dance duration, including existing config files.
+        musicMinSeconds = 10;
+        musicMaxSeconds = 30;
         earlyRatioRounds = clamp(earlyRatioRounds, 0, 20);
         earlySeatPercent = clamp(earlySeatPercent, 10, 100);
         lateSeatPercent = clamp(lateSeatPercent, 10, 100);
-        arenaRadius = clamp(arenaRadius, 5, 20);
-        if (musicSounds == null || musicSounds.isEmpty()) {
-            musicSounds = new ArrayList<>(List.of("minecraft:music.game"));
-        }
+        // Upgrade older configs to the roomier arena instead of retaining the old radius.
+        arenaRadius = clamp(Math.max(arenaRadius, 12), 5, 20);
+        musicSounds = new ArrayList<>(List.of(
+                "minecraft:music_disc.otherside",
+                "minecraft:music_disc.tears",
+                "minecraft:music_disc.precipice",
+                "minecraft:music_disc.creator",
+                "minecraft:music_disc.pigstep",
+                "minecraft:music_disc.bounce",
+                "minecraft:music_disc.lava_chicken"
+        ));
         if (first == null) first = Prize.defaultFirst();
         if (second == null) second = Prize.defaultSecond();
         if (third == null) third = Prize.defaultThird();
