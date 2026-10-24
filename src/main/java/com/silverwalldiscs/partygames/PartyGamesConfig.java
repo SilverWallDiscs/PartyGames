@@ -14,7 +14,7 @@ import java.util.List;
 public final class PartyGamesConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
-    public int configVersion = 2;
+    public int configVersion = 0;
     public int eventIntervalMinutes = 30;
     public int joinDurationSeconds = 60;
     public int minimumPlayers = 2;
@@ -43,6 +43,7 @@ public final class PartyGamesConfig {
             Files.createDirectories(path.getParent());
             if (Files.notExists(path)) {
                 PartyGamesConfig defaults = new PartyGamesConfig();
+                defaults.normalize();
                 save(path, defaults);
                 return defaults;
             }
@@ -55,6 +56,7 @@ public final class PartyGamesConfig {
         } catch (Exception e) {
             PartyGamesMod.LOGGER.error("Could not load PartyGames config; using defaults.", e);
             PartyGamesConfig defaults = new PartyGamesConfig();
+            defaults.normalize();
             save(path, defaults);
             return defaults;
         }
