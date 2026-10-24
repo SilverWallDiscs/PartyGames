@@ -84,8 +84,9 @@ public final class PartyGamesManager {
     private static final int RACE_START_LOCAL_X = 96;
     private static final int RACE_START_LOCAL_Z = 1;
     private static final int RACE_START_SURFACE_LOCAL_Y = 5;
-    private static final int RACE_FINISH_MIN_LOCAL_X = 45;
-    private static final int RACE_FINISH_MAX_LOCAL_X = 145;
+    private static final int RACE_FINISH_LINE_LOCAL_X = 96;
+    private static final int RACE_FINISH_MIN_LOCAL_Z = 0;
+    private static final int RACE_FINISH_MAX_LOCAL_Z = 3;
     private static final int RACE_COUNTDOWN_SECONDS = 5;
     private static final long RACE_TIMEOUT_MILLIS = 180_000L;
     private static final int RACE_HONEY_LOCAL_Z_START = 120;
@@ -1252,12 +1253,13 @@ public final class PartyGamesManager {
                 playRaceSound(player, "minecraft:entity.slime.jump", 0.8F, 1.0F);
             }
 
-            // The start/finish line is the upper straight at local Z=0. Ignore the initial
-            // crossing into the course; finish only on the return crossing after a lap.
-            double finishLineZ = RACE_TRACK_ORIGIN_Z + 0.5D;
-            double localX = currentX - RACE_TRACK_ORIGIN_X;
-            if (previousZ > finishLineZ && currentZ <= finishLineZ
-                    && localX >= RACE_FINISH_MIN_LOCAL_X && localX <= RACE_FINISH_MAX_LOCAL_X
+            // Place the line on the top straight at the shared start X. Racers start exactly
+            // on this X coordinate, so the initial movement does not count; returning from the
+            // circuit crosses it again eastbound and completes the lap.
+            double finishLineX = RACE_TRACK_ORIGIN_X + RACE_FINISH_LINE_LOCAL_X + 0.5D;
+            double localZ = currentZ - RACE_TRACK_ORIGIN_Z;
+            if (previousX < finishLineX && currentX >= finishLineX
+                    && localZ >= RACE_FINISH_MIN_LOCAL_Z && localZ <= RACE_FINISH_MAX_LOCAL_Z
                     && totalDistance > 100.0D) {
                 raceFinishOrder.add(uuid);
                 boat.setDeltaMovement(Vec3.ZERO);
