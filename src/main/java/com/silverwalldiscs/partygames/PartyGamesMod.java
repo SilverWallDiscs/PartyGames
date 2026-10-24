@@ -86,10 +86,13 @@ public final class PartyGamesMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(manager::tick);
         ServerLifecycleEvents.SERVER_STARTED.register(manager::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(manager::onServerStopping);
-        // Run recovery in the JOIN callback before the player can issue a command.
-        // Deferring this to the next task lets /partygames join race with return-state cleanup.
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
-                manager.onPlayerJoin(server, handler.player));
+        // Mark recovery as pending synchronously, but do not move/touch the entity from
+        // inside JOIN itself. Vanilla still has to finish registering it with PlayerList,
+        // the level entity manager and chunk tracking before returnPlayer may teleport it.
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            manager.markPlayerRecoveryPending(handler.player);
+            server.execute(() -> manager.onPlayerJoin(server, handler.player));
+        });
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 manager.onPlayerDisconnect(server, handler.player));
 
