@@ -435,8 +435,9 @@ public final class PartyGamesManager {
             return;
         }
 
-        if (phase == Phase.SEAT_RUSH && now >= phaseEndsAt) {
-            resolveSeatRush(server);
+        if (phase == Phase.SEAT_RUSH) {
+            keepPlayersSeated(server);
+            if (now >= phaseEndsAt) resolveSeatRush(server);
         }
     }
 
@@ -623,7 +624,12 @@ public final class PartyGamesManager {
                 eliminated.add(uuid);
                 continue;
             }
-            BlockPos floorUnderPlayer = player.blockPosition().below();
+            Entity vehicle = player.getVehicle();
+            BlockPos floorUnderPlayer = isCushion(vehicle)
+                    ? new BlockPos(net.minecraft.core.BlockPos.containing(vehicle.getX(), FLOOR_Y, vehicle.getZ()).getX(),
+                                   FLOOR_Y,
+                                   net.minecraft.core.BlockPos.containing(vehicle.getX(), FLOOR_Y, vehicle.getZ()).getZ())
+                    : player.blockPosition().below();
             if (seatPositions.contains(floorUnderPlayer) && occupiedSeats.add(floorUnderPlayer)) {
                 survivors.add(uuid);
             } else {
@@ -710,7 +716,7 @@ public final class PartyGamesManager {
         if (player == null) {
             for (String command : prize.commands) saved.commands.add(command.replace("%place%", Integer.toString(place)));
             for (PartyGamesConfig.ItemReward item : prize.items) {
-                if (item != null && item.id != null && item.count > 0) saved.items.add(new PendingItem(item.id, item.count));
+                if (item != null && item.id != null && item.count > 0) saved.items.add(new PendingItem(item.id, item.count, item.stackData));
             }
             savePendingRewards();
             return;
@@ -727,7 +733,7 @@ public final class PartyGamesManager {
                 continue;
             }
             player.getInventory().add(stack);
-            if (!stack.isEmpty()) saved.items.add(new PendingItem(rewardItem.id, stack.getCount()));
+            if (!stack.isEmpty()) saved.items.add(new PendingItem(rewardItem.id, stack.getCount(), rewardItem.stackData));
         }
         if (saved.items.isEmpty() && saved.commands.isEmpty()) pendingRewards.remove(uuid);
         if (!saved.items.isEmpty()) {
@@ -752,10 +758,10 @@ public final class PartyGamesManager {
 
         List<PendingItem> leftovers = new ArrayList<>();
         for (PendingItem reward : saved.items) {
-            ItemStack stack = createStack(player.level().getServer(), reward.id, reward.count);
+            ItemStack stack = createStack(player.level().getServer(), new PartyGamesConfig.ItemReward(reward.id, reward.count, reward.stackData));
             if (stack.isEmpty()) continue;
             player.getInventory().add(stack);
-            if (!stack.isEmpty()) leftovers.add(new PendingItem(reward.id, stack.getCount()));
+            if (!stack.isEmpty()) leftovers.add(new PendingItem(reward.id, stack.getCount(), reward.stackData));
         }
         saved.items.clear();
         saved.items.addAll(leftovers);
@@ -1014,6 +1020,45 @@ public final class PartyGamesManager {
                 volume, pitch, RANDOM.nextLong()));
     }
 
+    private boolean isCushion(Entity entity) {
+        if (entity == null) return false;
+        Identifier typeId = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        return typeId != null && "minecraft:cushion".equals(typeId.toString());
+    }
+
+    private Entity findCushion(BlockPos floorPos) {
+        if (eventLevel == null) return null;
+        AABB box = new AABB(floorPos.getX(), FLOOR_Y, floorPos.getZ(),
+                floorPos.getX() + 1.0, FLOOR_Y + 3.0, floorPos.getZ() + 1.0);
+        return eventLevel.getEntitiesOfClass(Entity.class, box, this::isCushion).stream().findFirst().orElse(null);
+    }
+
+    private void keepPlayersSeated(MinecraftServer server) {
+        for (UUID uuid : new ArrayList<>(alivePlayers)) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null || player.level() != eventLevel) continue;
+            if (isCushion(player.getVehicle())) continue;
+
+            BlockPos nearestSeat = null;
+            double nearestDistance = Double.MAX_VALUE;
+            for (BlockPos seat : seatPositions) {
+                double distance = player.distanceToSqr(seat.getX() + 0.5, FLOOR_Y + 1.0, seat.getZ() + 0.5);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearestSeat = seat;
+                }
+            }
+            // Remount players who sneak off a cushion; a small radius allows the normal seat offset.
+            if (nearestSeat != null && nearestDistance <= 6.25) {
+                Entity cushion = findCushion(nearestSeat);
+                if (cushion != null && (cushion.getPassengers().isEmpty()
+                        || cushion.getPassengers().contains(player))) {
+                    player.startRiding(cushion, true);
+                }
+            }
+        }
+    }
+
     private void spawnCushion(BlockPos floorPos) {
         if (eventLevel == null) return;
         MinecraftServer server = eventLevel.getServer();
@@ -1134,13 +1179,19 @@ public final class PartyGamesManager {
     private static final class PendingItem {
         public String id;
         public int count;
+        public JsonElement stackData;
 
         public PendingItem() {
         }
 
         public PendingItem(String id, int count) {
+            this(id, count, null);
+        }
+
+        public PendingItem(String id, int count, JsonElement stackData) {
             this.id = id;
             this.count = count;
+            this.stackData = stackData;
         }
     }
 }
