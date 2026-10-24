@@ -1257,9 +1257,9 @@ public final class PartyGamesManager {
             // on this X coordinate, so the initial movement does not count; returning from the
             // circuit crosses it again eastbound and completes the lap.
             double finishLineX = RACE_TRACK_ORIGIN_X + RACE_FINISH_LINE_LOCAL_X + 0.5D;
-            double localZ = currentZ - RACE_TRACK_ORIGIN_Z;
+            double finishLocalZ = currentZ - RACE_TRACK_ORIGIN_Z;
             if (previousX < finishLineX && currentX >= finishLineX
-                    && localZ >= RACE_FINISH_MIN_LOCAL_Z && localZ <= RACE_FINISH_MAX_LOCAL_Z
+                    && finishLocalZ >= RACE_FINISH_MIN_LOCAL_Z && finishLocalZ <= RACE_FINISH_MAX_LOCAL_Z
                     && totalDistance > 100.0D) {
                 raceFinishOrder.add(uuid);
                 boat.setDeltaMovement(Vec3.ZERO);
