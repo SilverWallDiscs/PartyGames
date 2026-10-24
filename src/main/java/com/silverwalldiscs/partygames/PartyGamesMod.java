@@ -1,6 +1,8 @@
 package com.silverwalldiscs.partygames;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -112,6 +114,22 @@ public final class PartyGamesMod implements ModInitializer {
                         context.getSource().sendSuccess(() -> Component.literal("PartyGames configuration reloaded."), true);
                         return 1;
                     }))
+                    .then(Commands.literal("modify")
+                            .requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS)))
+                            .executes(context -> {
+                                manager.openModifyMenu(context.getSource().getPlayerOrException());
+                                return 1;
+                            })
+                            .then(Commands.literal("addcommand")
+                                    .then(Commands.argument("place", IntegerArgumentType.integer(1, 3))
+                                            .then(Commands.argument("command", StringArgumentType.greedyString())
+                                                    .executes(context -> {
+                                                        manager.addPrizeCommand(
+                                                                context.getSource().getPlayerOrException(),
+                                                                IntegerArgumentType.getInteger(context, "place"),
+                                                                StringArgumentType.getString(context, "command"));
+                                                        return 1;
+                                                    })))))
             );
         });
     }
