@@ -86,8 +86,10 @@ public final class PartyGamesMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(manager::tick);
         ServerLifecycleEvents.SERVER_STARTED.register(manager::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(manager::onServerStopping);
+        // Run recovery in the JOIN callback before the player can issue a command.
+        // Deferring this to the next task lets /partygames join race with return-state cleanup.
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) ->
-                server.execute(() -> manager.onPlayerJoin(server, handler.player)));
+                manager.onPlayerJoin(server, handler.player));
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 manager.onPlayerDisconnect(server, handler.player));
 
