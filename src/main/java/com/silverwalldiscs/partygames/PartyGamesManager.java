@@ -93,7 +93,6 @@ public final class PartyGamesManager {
     private static final int RACE_HONEY_LOCAL_Z_END = 126;
     private static final int RACE_SLIME_LOCAL_Z_START = 155;
     private static final int RACE_SLIME_LOCAL_Z_END = 159;
-    private static final String RACE_BOAT_TAG = "partygames_race_boat";
     private static final String RACE_SCHEMATIC_RESOURCE = "/data/partygames/boat_track.schem.b64";
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
     private static final Random RANDOM = new Random();
@@ -899,8 +898,8 @@ public final class PartyGamesManager {
                 continue;
             }
 
-            boat.addTag(RACE_BOAT_TAG);
-            boat.setRot(-90.0F, 0.0F);
+            boat.setYRot(-90.0F);
+            boat.setXRot(0.0F);
             boat.setDeltaMovement(Vec3.ZERO);
             player.stopRiding();
             player.teleportTo(eventLevel, spawnX, spawnY, spawnZ, Set.of(), -90.0F, 0.0F, true);
@@ -1187,7 +1186,8 @@ public final class PartyGamesManager {
             if (boat == null || start == null || boat.isRemoved()) continue;
             boat.setDeltaMovement(Vec3.ZERO);
             boat.setPos(start.x, start.y, start.z);
-            boat.setRot(-90.0F, 0.0F);
+            boat.setYRot(-90.0F);
+            boat.setXRot(0.0F);
             ServerPlayer player = eventLevel.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player != null && player.getVehicle() != boat) player.startRiding(boat, true, true);
         }
