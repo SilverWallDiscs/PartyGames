@@ -635,9 +635,11 @@ public final class PartyGamesManager {
                         "Removed stale player entity {} ({}) from dimension {} because no matching online player exists.",
                         levelPlayer.getGameProfile().name(), uuid, level.dimension().identifier());
 
-                joinedPlayers.remove(uuid);
-                alivePlayers.remove(uuid);
-                awaitingPrizeCommandInput.remove(uuid);
+                if (listedPlayer == null) {
+                    joinedPlayers.remove(uuid);
+                    alivePlayers.remove(uuid);
+                    awaitingPrizeCommandInput.remove(uuid);
+                }
             }
         }
     }
