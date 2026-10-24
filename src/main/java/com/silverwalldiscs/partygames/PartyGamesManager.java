@@ -862,7 +862,7 @@ public final class PartyGamesManager {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null) continue;
             int laneZ = raceLaneZ(lane);
-            double spawnX = RACE_START_X + 6.0D;
+            double spawnX = RACE_START_X - 4.0D;
             double spawnY = FLOOR_Y + 1.0D;
             double spawnZ = laneZ + 0.5D;
             Entity boat = summonRaceBoat(server, spawnX, spawnY, spawnZ);
@@ -1060,7 +1060,7 @@ public final class PartyGamesManager {
             if (player.getVehicle() != boat) player.startRiding(boat, true, true);
 
             double currentX = boat.getX();
-            double previousX = raceLastX.getOrDefault(uuid, RACE_START_X + 6.0D);
+            double previousX = raceLastX.getOrDefault(uuid, RACE_START_X - 4.0D);
             int jumpStage = raceJumpStage.getOrDefault(uuid, 0);
             if (jumpStage < RACE_JUMP_OFFSETS.length) {
                 double jumpX = RACE_START_X + RACE_JUMP_OFFSETS[jumpStage];
