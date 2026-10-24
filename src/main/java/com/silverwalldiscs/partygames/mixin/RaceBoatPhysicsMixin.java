@@ -1,5 +1,7 @@
 package com.silverwalldiscs.partygames.mixin;
 
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -8,12 +10,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Entity.class)
 public abstract class RaceBoatPhysicsMixin {
-    private static final String PARTY_GAMES_RACE_BOAT_TAG = "partygames_race_boat";
+    private boolean partyGames$isRaceBoat(Entity entity) {
+        if (entity == null
+                || !"partygames:event".equals(entity.level().dimension().identifier().toString())) {
+            return false;
+        }
+        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        return id != null && "minecraft:oak_boat".equals(id.toString());
+    }
 
     @Inject(method = "maxUpStep", at = @At("HEAD"), cancellable = true)
     private void partyGames$allowOneBlockStep(CallbackInfoReturnable<Float> cir) {
-        Entity self = (Entity) (Object) this;
-        if (self.getTags().contains(PARTY_GAMES_RACE_BOAT_TAG)) {
+        if (partyGames$isRaceBoat((Entity) (Object) this)) {
             cir.setReturnValue(1.0F);
         }
     }
@@ -21,9 +29,7 @@ public abstract class RaceBoatPhysicsMixin {
     @Inject(method = "canCollideWith", at = @At("HEAD"), cancellable = true)
     private void partyGames$disableRaceBoatCollision(Entity other, CallbackInfoReturnable<Boolean> cir) {
         Entity self = (Entity) (Object) this;
-        if (self.getTags().contains(PARTY_GAMES_RACE_BOAT_TAG)
-                && other != null
-                && other.getTags().contains(PARTY_GAMES_RACE_BOAT_TAG)) {
+        if (partyGames$isRaceBoat(self) && partyGames$isRaceBoat(other)) {
             cir.setReturnValue(false);
         }
     }
