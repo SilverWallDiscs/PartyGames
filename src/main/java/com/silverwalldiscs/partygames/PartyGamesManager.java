@@ -1062,7 +1062,7 @@ public final class PartyGamesManager {
     private void spawnCushion(BlockPos floorPos) {
         if (eventLevel == null) return;
         MinecraftServer server = eventLevel.getServer();
-        String blockPosition = floorPos.getX() + "," + (FLOOR_Y + 1) + "," + floorPos.getZ();
+        String blockPosition = floorPos.getX() + "," + floorPos.getY() + "," + floorPos.getZ();
         String command = "summon minecraft:cushion "
                 + (floorPos.getX() + 0.5) + " " + (FLOOR_Y + 1) + " " + (floorPos.getZ() + 0.5)
                 + " {block_pos:[I;" + blockPosition + "],color:\"lime\"}";
