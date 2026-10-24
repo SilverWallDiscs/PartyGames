@@ -1,6 +1,7 @@
 package com.silverwalldiscs.partygames;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -116,8 +117,25 @@ public final class PartyGamesMod implements ModInitializer {
                         context.getSource().sendSuccess(() -> Component.literal(manager.status()), false);
                         return 1;
                     }))
-                    .then(Commands.literal("start").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context ->
-                            manager.startRegistration(context.getSource().getServer(), false) ? 1 : 0))
+                    .then(Commands.literal("start")
+                            .requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS)))
+                            .executes(context -> manager.startSelectedGame(context.getSource().getServer(), "Dance Floor", false) ? 1 : 0)
+                            .then(Commands.argument("minigame", StringArgumentType.greedyString())
+                                    .suggests((context, builder) -> {
+                                        builder.suggest("Dance Floor");
+                                        builder.suggest("Music Chairs");
+                                        builder.suggest("Boat Race");
+                                        return builder.buildFuture();
+                                    })
+                                    .executes(context -> {
+                                        String selected = StringArgumentType.getString(context, "minigame");
+                                        if (!manager.isSupportedGameSelection(selected)) {
+                                            context.getSource().sendFailure(Component.literal(
+                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Boat Race."));
+                                            return 0;
+                                        }
+                                        return manager.startSelectedGame(context.getSource().getServer(), selected, false) ? 1 : 0;
+                                    })))
                     .then(Commands.literal("stop").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context -> {
                         manager.cancelEvent(context.getSource().getServer());
                         return 1;
