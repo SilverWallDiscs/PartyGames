@@ -3,7 +3,8 @@
   "package": "com.silverwalldiscs.partygames.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "PlayerDropMixin"
+    "PlayerDropMixin",
+    "ProtectedPlayerMixin"
   ],
   "injectors": {
     "defaultRequire": 1
