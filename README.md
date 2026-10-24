@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.1.2**
+**Current version: 0.1.3**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
@@ -19,7 +19,8 @@ The first playable minigame is **Dance Floor**:
 - If reward items do not fit in a player's inventory, the leftovers are persisted and can be claimed with **/partygames retrieve**.
 - Return locations and pending rewards are persisted so a server restart does not strand a player in the event dimension or erase unclaimed items.
 - A participant who falls below Y=0 is teleported back onto the arena floor, with velocity and fall distance reset.
-- Disconnect cleanup periodically removes stale player entities that are no longer present in the server player list, preventing abandoned ghost entities from remaining in the arena.
+- Disconnect cleanup checks the entity manager for half-removed player entities after disconnects and explicitly tells clients to remove stale entity IDs, preventing abandoned ghost entities from remaining visible.
+- On server shutdown, the active event is stopped without awarding prizes, temporary event entities are cleaned up, and player return locations remain saved so participants can be restored when they reconnect after the restart.
 
 PartyGames is server-side. Players do not need to install the mod on their clients.
 
