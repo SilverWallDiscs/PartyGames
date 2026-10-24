@@ -500,6 +500,9 @@ public final class PartyGamesManager {
         }
 
         if (phase == Phase.IDLE) {
+            // No player should remain in the reserved event dimension between games.
+            // This also repairs sessions left behind by an interrupted return/finish.
+            recoverOrphanedEventPlayers(server);
             if (now >= nextAutomaticEventAt) {
                 startRegistration(server, true);
             }
@@ -584,8 +587,10 @@ public final class PartyGamesManager {
             return 0;
         }
 
-        ReturnPoint returnPoint = snapshot(player);
-        returnPoints.put(uuid, returnPoint);
+        // The first snapshot is the player's real pre-event state. During a quick
+        // disconnect/reconnect, a join command can run before the JOIN callback restores
+        // that snapshot. Never overwrite it with temporary event abilities/coordinates.
+        returnPoints.putIfAbsent(uuid, snapshot(player));
         entrantNames.put(uuid, player.getGameProfile().name());
         joinedPlayers.add(uuid);
         alivePlayers.add(uuid);
@@ -616,8 +621,14 @@ public final class PartyGamesManager {
 
     public void onPlayerJoin(MinecraftServer server, ServerPlayer player) {
         UUID uuid = player.getUUID();
-        if (!joinedPlayers.contains(uuid) && returnPoints.containsKey(uuid)) {
-            returnPlayer(server, player);
+        if (!joinedPlayers.contains(uuid)) {
+            if (returnPoints.containsKey(uuid)) {
+                returnPlayer(server, player);
+            } else if (eventLevel != null && player.level() == eventLevel) {
+                // The saved snapshot may be missing/corrupt after an interrupted session.
+                // Do not leave the player stuck in the protected event dimension.
+                recoverPlayerWithoutReturnPoint(server, player, "reconnected without a saved return point");
+            }
         }
         deliverPending(player, false);
     }
@@ -1012,8 +1023,9 @@ public final class PartyGamesManager {
         UUID uuid = player.getUUID();
         ReturnPoint point = returnPoints.get(uuid);
         if (point == null) {
-            joinedPlayers.remove(uuid);
-            alivePlayers.remove(uuid);
+            // Returning without a snapshot must still restore a usable player state.
+            // Otherwise a player can be left with mayBuild=false and be unable to play.
+            recoverPlayerWithoutReturnPoint(server, player, "return point was missing at event end");
             return;
         }
 
@@ -1049,6 +1061,51 @@ public final class PartyGamesManager {
         joinedPlayers.remove(uuid);
         alivePlayers.remove(uuid);
         saveSessions();
+    }
+
+    private void recoverOrphanedEventPlayers(MinecraftServer server) {
+        if (eventLevel == null) return;
+
+        for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
+            if (player.level() != eventLevel || joinedPlayers.contains(player.getUUID())) continue;
+
+            UUID uuid = player.getUUID();
+            if (returnPoints.containsKey(uuid)) {
+                returnPlayer(server, player);
+            } else {
+                recoverPlayerWithoutReturnPoint(server, player, "orphaned in the event dimension while no game is active");
+            }
+        }
+    }
+
+    private void recoverPlayerWithoutReturnPoint(MinecraftServer server, ServerPlayer player, String reason) {
+        UUID uuid = player.getUUID();
+        ServerLevel destination = server.overworld();
+        BlockPos spawn = destination.getSharedSpawnPos();
+
+        player.stopRiding();
+        player.setDeltaMovement(Vec3.ZERO);
+        player.teleportTo(destination, spawn.getX() + 0.5D, spawn.getY() + 1.0D,
+                spawn.getZ() + 0.5D, Set.of(), player.getYRot(), player.getXRot(), true);
+        player.setGameMode(GameType.SURVIVAL);
+        player.setPermanentlyInvulnerable(false);
+        player.getAbilities().mayBuild = true;
+        player.getAbilities().instabuild = false;
+        player.getAbilities().mayfly = false;
+        player.getAbilities().flying = false;
+        player.onUpdateAbilities();
+
+        joinedPlayers.remove(uuid);
+        alivePlayers.remove(uuid);
+        awaitingPrizeCommandInput.remove(uuid);
+        returnPoints.remove(uuid);
+        saveSessions();
+
+        player.sendSystemMessage(Component.literal(
+                "PartyGames recovered your player state and returned you to the Overworld spawn.")
+                .withStyle(ChatFormatting.YELLOW));
+        PartyGamesMod.LOGGER.warn("Recovered player {} to the Overworld spawn: {}.",
+                player.getGameProfile().name(), reason);
     }
 
     private ReturnPoint snapshot(ServerPlayer player) {
