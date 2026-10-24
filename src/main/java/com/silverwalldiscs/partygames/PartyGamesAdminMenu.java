@@ -5,7 +5,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.Container;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.ChestMenu;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.item.ItemStack;
@@ -57,7 +57,7 @@ public final class PartyGamesAdminMenu extends ChestMenu {
     }
 
     @Override
-    public void clicked(int slotId, int button, ClickType clickType, Player player) {
+    public void clicked(int slotId, int button, ContainerInput clickType, Player player) {
         if (!owner.getUUID().equals(player.getUUID())) {
             return;
         }
@@ -68,7 +68,7 @@ public final class PartyGamesAdminMenu extends ChestMenu {
                 return;
             }
 
-            if (clickType == ClickType.PICKUP) {
+            if (clickType == ContainerInput.PICKUP) {
                 manager.handleAdminMenuClick(owner, view, place, page, slotId, button, container);
             }
             return;
