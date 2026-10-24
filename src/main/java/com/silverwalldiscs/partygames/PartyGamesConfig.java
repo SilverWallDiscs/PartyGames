@@ -14,6 +14,7 @@ import java.util.List;
 public final class PartyGamesConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
+    public int configVersion = 2;
     public int eventIntervalMinutes = 30;
     public int joinDurationSeconds = 60;
     public int minimumPlayers = 2;
@@ -71,6 +72,19 @@ public final class PartyGamesConfig {
     }
 
     public void normalize() {
+        // One-time upgrade for servers that already have a config with empty reward commands.
+        if (configVersion < 2) {
+            if (first != null && first.commands != null && first.commands.isEmpty()) {
+                first.commands.add("playsound minecraft:entity.firework_rocket.large_blast master @s ~ ~ ~ 1 1");
+            }
+            if (second != null && second.commands != null && second.commands.isEmpty()) {
+                second.commands.add("give @p minecraft:gold_ingot 8");
+            }
+            if (third != null && third.commands != null && third.commands.isEmpty()) {
+                third.commands.add("give @s minecraft:iron_ingot 16");
+            }
+            configVersion = 2;
+        }
         eventIntervalMinutes = clamp(eventIntervalMinutes, 1, 10080);
         joinDurationSeconds = clamp(joinDurationSeconds, 10, 600);
         minimumPlayers = clamp(minimumPlayers, 2, 200);
