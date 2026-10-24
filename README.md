@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.1.8**
+**Current version: 0.1.9**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
@@ -43,7 +43,7 @@ PartyGames is server-side. Players do not need to install the mod on their clien
 4. Open **config/partygames/config.json** to customize event timing and rewards.
 5. Restart the server after first installation or after changing the bundled dimension data.
 
-The arena is generated/cleared at the origin of **partygames:event**; that dimension is reserved for PartyGames.
+The dance arena is generated at the origin of **partygames:event**. Boat Race uses the bundled schematic more than 300 chunks away in that same reserved dimension.
 
 ## Commands
 
@@ -53,7 +53,7 @@ The arena is generated/cleared at the origin of **partygames:event**; that dimen
 - **/partygames start** — open Dance Floor registration immediately (operator permission required).
 - **/partygames start Music Chairs** — alias for Dance Floor / musical chairs (operator permission required).
 - **/partygames start Boat Race** — open registration for the ice boat-racing minigame.
-- Boat Race generates a 16-lane ice track around X=5120–5500 in the event dimension (over 300 chunks from the dance arena), with honey slow zones and slime jump pads. Each racer receives a boat; the private 3–2–1–GO countdown begins movement after the start signal.
+- Boat Race pastes the supplied `packeticetrack.schem` as a single 162×8×250 packed-ice course at X=5120 in the event dimension (320 chunks from the dance arena). The course has a shared start point, a 5-second private countdown with sounds, a maximum of 16 racers, honey slow blocks and a slime jump pad. Race boats do not collide with each other and can step up blocks up to one block high.
 - **/partygames stop** — cancel the current event and return participants (operator permission required).
 - **/partygames reload** — reload the JSON configuration (operator permission required).
 - **/partygames modify** — open the prize editor (operator permission required).

@@ -5,8 +5,15 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.google.gson.JsonElement;
 import com.mojang.serialization.JsonOps;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.Reader;
 import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.zip.GZIPInputStream;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -66,15 +73,27 @@ public final class PartyGamesManager {
     private static final int FLOOR_Y = 64;
     private static final int WALL_HEIGHT = 9;
     private static final int ROOF_Y = FLOOR_Y + WALL_HEIGHT + 1;
-    // The boat circuit starts at X=5120 (320 chunks from the dance arena at the origin).
-    private static final int RACE_START_X = 5120;
-    private static final int RACE_FINISH_X = 5500;
+    // Paste the supplied 162x8x250 schematic at X=5120 (320 chunks from the dance arena).
+    private static final int RACE_TRACK_ORIGIN_X = 5120;
+    private static final int RACE_TRACK_ORIGIN_Y = 64;
+    private static final int RACE_TRACK_ORIGIN_Z = -125;
+    private static final int RACE_TRACK_WIDTH = 162;
+    private static final int RACE_TRACK_HEIGHT = 8;
+    private static final int RACE_TRACK_LENGTH = 250;
     private static final int RACE_MAX_PLAYERS = 16;
-    private static final int RACE_FIRST_LANE_Z = -30;
-    private static final int RACE_LANE_SPACING = 4;
+    private static final int RACE_START_LOCAL_X = 96;
+    private static final int RACE_START_LOCAL_Z = 1;
+    private static final int RACE_START_SURFACE_LOCAL_Y = 5;
+    private static final int RACE_FINISH_LINE_LOCAL_X = 96;
+    private static final int RACE_FINISH_MIN_LOCAL_Z = 0;
+    private static final int RACE_FINISH_MAX_LOCAL_Z = 3;
+    private static final int RACE_COUNTDOWN_SECONDS = 5;
     private static final long RACE_TIMEOUT_MILLIS = 180_000L;
-    private static final int[] RACE_JUMP_OFFSETS = {130, 278};
-    private static final int[][] RACE_HONEY_ZONES = {{82, 91}, {194, 203}};
+    private static final int RACE_HONEY_LOCAL_Z_START = 120;
+    private static final int RACE_HONEY_LOCAL_Z_END = 126;
+    private static final int RACE_SLIME_LOCAL_Z_START = 155;
+    private static final int RACE_SLIME_LOCAL_Z_END = 159;
+    private static final String RACE_SCHEMATIC_RESOURCE = "/data/partygames/boat_track.schem.b64";
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
     private static final Random RANDOM = new Random();
     private static final List<String> MUSIC_DISC_SOUNDS = List.of(
@@ -133,8 +152,8 @@ public final class PartyGamesManager {
     private final Map<UUID, Entity> raceBoats = new HashMap<>();
     private final Map<UUID, Vec3> raceBoatSpawnPositions = new HashMap<>();
     private final Map<UUID, Double> raceLastX = new HashMap<>();
-    private final Map<UUID, Integer> raceJumpStage = new HashMap<>();
-    private final Map<UUID, Integer> raceLaneByPlayer = new HashMap<>();
+    private final Map<UUID, Double> raceLastZ = new HashMap<>();
+    private final Map<UUID, Double> raceDistance = new HashMap<>();
     private final List<UUID> raceFinishOrder = new ArrayList<>();
 
     private Phase phase = Phase.IDLE;
@@ -147,6 +166,7 @@ public final class PartyGamesManager {
     private int nextSpawnIndex;
     private Identifier activeMusicId;
     private boolean arenaPrepared;
+    private boolean raceTrackPrepared;
     private boolean loggedMissingDimension;
     private int countdownValue;
 
@@ -688,7 +708,7 @@ public final class PartyGamesManager {
         int playerLimit = activeMinigame == Minigame.BOAT_RACE ? RACE_MAX_PLAYERS : 200;
         if (joinedPlayers.size() >= playerLimit) {
             player.sendSystemMessage(Component.literal(activeMinigame == Minigame.BOAT_RACE
-                    ? "Boat Race is full (maximum 16 racers)." : "This event has reached its player limit."));
+                    ? "Boat Race is full (maximum 16 racers; all share one start point)." : "This event has reached its player limit."));
             return 0;
         }
 
@@ -788,8 +808,8 @@ public final class PartyGamesManager {
         if (raceBoat != null) raceBoat.discard();
         raceBoatSpawnPositions.remove(uuid);
         raceLastX.remove(uuid);
-        raceJumpStage.remove(uuid);
-        raceLaneByPlayer.remove(uuid);
+        raceLastZ.remove(uuid);
+        raceDistance.remove(uuid);
         if (wasAlive && phase != Phase.IDLE && phase != Phase.JOINING) {
             eliminationOrder.add(uuid);
         }
@@ -816,7 +836,8 @@ public final class PartyGamesManager {
         player.teleportTo(eventLevel, start.x, start.y, start.z, Set.of(), -90.0F, 0.0F, true);
         player.startRiding(boat, true, true);
         raceLastX.put(uuid, start.x);
-        raceJumpStage.put(uuid, 0);
+        raceLastZ.put(uuid, start.z);
+        raceDistance.put(uuid, 0.0D);
         player.sendSystemMessage(Component.literal("You fell off the course and were returned to your starting line.")
                 .withStyle(ChatFormatting.YELLOW));
     }
@@ -848,43 +869,51 @@ public final class PartyGamesManager {
 
     private void startBoatRace(MinecraftServer server) {
         clearRaceBoats();
-        prepareRaceTrack();
         raceFinishOrder.clear();
         raceBoatSpawnPositions.clear();
         raceLastX.clear();
-        raceJumpStage.clear();
-        raceLaneByPlayer.clear();
+        raceLastZ.clear();
+        raceDistance.clear();
+
+        if (!prepareRaceTrack()) {
+            broadcast(server, "Boat Race could not load packeticetrack.schem; check the PartyGames resource and server log.");
+            finishEvent(server, null, false);
+            return;
+        }
 
         List<UUID> entrants = new ArrayList<>(joinedPlayers);
-        int lane = 0;
+        double spawnX = RACE_TRACK_ORIGIN_X + RACE_START_LOCAL_X + 0.5D;
+        double spawnY = RACE_TRACK_ORIGIN_Y + RACE_START_SURFACE_LOCAL_Y + 1.0D;
+        double spawnZ = RACE_TRACK_ORIGIN_Z + RACE_START_LOCAL_Z + 0.5D;
+        int created = 0;
         for (UUID uuid : entrants) {
-            if (lane >= RACE_MAX_PLAYERS) break;
+            if (created >= RACE_MAX_PLAYERS) break;
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player == null) continue;
-            int laneZ = raceLaneZ(lane);
-            double spawnX = RACE_START_X - 4.0D;
-            double spawnY = FLOOR_Y + 1.0D;
-            double spawnZ = laneZ + 0.5D;
             Entity boat = summonRaceBoat(server, spawnX, spawnY, spawnZ);
             if (boat == null) {
-                PartyGamesMod.LOGGER.error("Could not spawn an oak boat for {} in lane {}.", player.getGameProfile().name(), lane + 1);
+                PartyGamesMod.LOGGER.error("Could not summon a race boat for {}.", player.getGameProfile().name());
                 player.sendSystemMessage(Component.literal("Could not create your race boat. Please contact an administrator.")
                         .withStyle(ChatFormatting.RED));
                 continue;
             }
+
+            boat.setYRot(-90.0F);
+            boat.setXRot(0.0F);
+            boat.setDeltaMovement(Vec3.ZERO);
             player.stopRiding();
             player.teleportTo(eventLevel, spawnX, spawnY, spawnZ, Set.of(), -90.0F, 0.0F, true);
             player.startRiding(boat, true, true);
-            boat.setDeltaMovement(Vec3.ZERO);
             raceBoats.put(uuid, boat);
             Vec3 start = new Vec3(spawnX, spawnY, spawnZ);
             raceBoatSpawnPositions.put(uuid, start);
             raceLastX.put(uuid, spawnX);
-            raceJumpStage.put(uuid, 0);
-            raceLaneByPlayer.put(uuid, lane);
-            player.sendSystemMessage(Component.literal("Boat Race: stay in your boat. The countdown is only visible to racers!")
+            raceLastZ.put(uuid, spawnZ);
+            raceDistance.put(uuid, 0.0D);
+            player.sendSystemMessage(Component.literal(
+                    "Boat Race: everyone starts together. Keep your boat; the 5-second countdown is private to racers.")
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
-            lane++;
+            created++;
         }
 
         if (raceBoats.size() < config.minimumPlayers) {
@@ -894,16 +923,16 @@ public final class PartyGamesManager {
         }
 
         phase = Phase.RACE_COUNTDOWN;
-        countdownValue = 3;
+        countdownValue = RACE_COUNTDOWN_SECONDS;
         nextColorChangeAt = System.currentTimeMillis();
         for (UUID uuid : raceBoats.keySet()) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player != null) {
-                player.sendSystemMessage(Component.literal("Get ready! First boat to the finish wins.")
+                player.sendSystemMessage(Component.literal("First boat to cross the finish line after one lap wins.")
                         .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
             }
         }
-        broadcast(server, "Boat Race started with " + raceBoats.size() + " racer(s)!");
+        broadcast(server, "Boat Race is ready with " + raceBoats.size() + " racer(s) on one shared track!");
     }
 
     private Entity summonRaceBoat(MinecraftServer server, double x, double y, double z) {
@@ -920,83 +949,228 @@ public final class PartyGamesManager {
                 .findFirst().orElse(null);
     }
 
-    private void prepareRaceTrack() {
-        if (eventLevel == null) return;
-        int minZ = RACE_FIRST_LANE_Z - 2;
-        int maxZ = RACE_FIRST_LANE_Z + (RACE_MAX_PLAYERS - 1) * RACE_LANE_SPACING + 2;
-        BlockState stone = Blocks.STONE_BRICKS.defaultBlockState();
-        BlockState ice = Blocks.BLUE_ICE.defaultBlockState();
-        BlockState dark = Blocks.CONCRETE.black().defaultBlockState();
-        BlockState rail = Blocks.CONCRETE.cyan().defaultBlockState();
+    private boolean prepareRaceTrack() {
+        if (eventLevel == null) return false;
+        if (raceTrackPrepared) return true;
+
+        RaceSchematic schematic = loadRaceSchematic();
+        if (schematic == null || schematic.width != RACE_TRACK_WIDTH
+                || schematic.height != RACE_TRACK_HEIGHT || schematic.length != RACE_TRACK_LENGTH) {
+            PartyGamesMod.LOGGER.error("Boat Race schematic is missing or has unexpected dimensions.");
+            return false;
+        }
+
         BlockState air = Blocks.AIR.defaultBlockState();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
 
-        // Build a reusable 16-lane track in the reserved event dimension, far from the dance arena.
-        for (int x = RACE_START_X - 8; x <= RACE_FINISH_X + 12; x++) {
-            int offset = x - RACE_START_X;
+        // Remove the previous generated multi-lane prototype in its old world coordinates.
+        clearBlockBox(RACE_TRACK_ORIGIN_X - 8, RACE_TRACK_ORIGIN_X + 392,
+                RACE_TRACK_ORIGIN_Y - 1, RACE_TRACK_ORIGIN_Y + 4,
+                -35, 35, air);
+
+        // Clear the schematic volume once, but do not send neighbor updates for hundreds of
+        // thousands of empty cells. Only actual changes are written.
+        clearBlockBox(RACE_TRACK_ORIGIN_X, RACE_TRACK_ORIGIN_X + RACE_TRACK_WIDTH - 1,
+                RACE_TRACK_ORIGIN_Y, RACE_TRACK_ORIGIN_Y + RACE_TRACK_HEIGHT - 1,
+                RACE_TRACK_ORIGIN_Z, RACE_TRACK_ORIGIN_Z + RACE_TRACK_LENGTH - 1, air);
+
+        BlockState ice = Blocks.PACKED_ICE.defaultBlockState();
+        for (BlockPos local : schematic.packedIceBlocks) {
+            pos.set(RACE_TRACK_ORIGIN_X + local.getX(),
+                    RACE_TRACK_ORIGIN_Y + local.getY(),
+                    RACE_TRACK_ORIGIN_Z + local.getZ());
+            if (!eventLevel.getBlockState(pos).equals(ice)) eventLevel.setBlock(pos, ice, 2);
+        }
+
+        overlayRaceObstacles(schematic);
+        raceTrackPrepared = true;
+        PartyGamesMod.LOGGER.info(
+                "Loaded Boat Race track from bundled schematic: {} packed-ice blocks, origin=({}, {}, {}).",
+                schematic.packedIceBlocks.size(), RACE_TRACK_ORIGIN_X, RACE_TRACK_ORIGIN_Y, RACE_TRACK_ORIGIN_Z);
+        return true;
+    }
+
+    private void clearBlockBox(int minX, int maxX, int minY, int maxY, int minZ, int maxZ, BlockState air) {
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
-                eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y - 1, z), stone);
-                BlockState surface = dark;
-                for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
-                    int center = raceLaneZ(lane);
-                    if (z >= center - 1 && z <= center + 1) {
-                        surface = raceSurface(offset, x, z, ice);
-                        break;
-                    }
+                for (int y = minY; y <= maxY; y++) {
+                    pos.set(x, y, z);
+                    if (!eventLevel.getBlockState(pos).isAir()) eventLevel.setBlock(pos, air, 2);
                 }
-                eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z), surface);
-                boolean separator = z == minZ || z == maxZ;
-                for (int lane = 0; lane < RACE_MAX_PLAYERS - 1; lane++) {
-                    if (z == raceLaneZ(lane) + 2) separator = true;
+            }
+        }
+    }
+
+    private void overlayRaceObstacles(RaceSchematic schematic) {
+        // Add both requested obstacle types to a long, straight section of the schematic.
+        // The underlying schematic remains the source of the track geometry and elevations.
+        Map<Long, Integer> topYByXZ = new HashMap<>();
+        for (BlockPos local : schematic.packedIceBlocks) {
+            long key = (((long) local.getX()) << 32) | (local.getZ() & 0xffffffffL);
+            topYByXZ.merge(key, local.getY(), Math::max);
+        }
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        BlockState honey = Blocks.HONEY_BLOCK.defaultBlockState();
+        BlockState slime = Blocks.SLIME_BLOCK.defaultBlockState();
+        for (int z = RACE_HONEY_LOCAL_Z_START; z <= RACE_HONEY_LOCAL_Z_END; z++) {
+            for (int x = 98; x <= 101; x++) {
+                Integer y = topYByXZ.get((((long) x) << 32) | (z & 0xffffffffL));
+                if (y != null) {
+                    pos.set(RACE_TRACK_ORIGIN_X + x, RACE_TRACK_ORIGIN_Y + y, RACE_TRACK_ORIGIN_Z + z);
+                    eventLevel.setBlock(pos, honey, 2);
                 }
-                for (int y = FLOOR_Y + 1; y <= FLOOR_Y + 3; y++) {
-                    if (separator && x >= RACE_START_X - 8 && x <= RACE_FINISH_X + 8) {
-                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), rail);
+            }
+        }
+        for (int z = RACE_SLIME_LOCAL_Z_START; z <= RACE_SLIME_LOCAL_Z_END; z++) {
+            for (int x = 98; x <= 101; x++) {
+                Integer y = topYByXZ.get((((long) x) << 32) | (z & 0xffffffffL));
+                if (y != null) {
+                    pos.set(RACE_TRACK_ORIGIN_X + x, RACE_TRACK_ORIGIN_Y + y, RACE_TRACK_ORIGIN_Z + z);
+                    eventLevel.setBlock(pos, slime, 2);
+                }
+            }
+        }
+    }
+
+    private RaceSchematic loadRaceSchematic() {
+        try (InputStream resource = PartyGamesManager.class.getResourceAsStream(RACE_SCHEMATIC_RESOURCE)) {
+            if (resource == null) {
+                PartyGamesMod.LOGGER.error("Could not find bundled schematic resource {}.", RACE_SCHEMATIC_RESOURCE);
+                return null;
+            }
+            String encoded = new String(resource.readAllBytes(), StandardCharsets.US_ASCII).trim();
+            byte[] compressed = Base64.getDecoder().decode(encoded);
+            try (DataInputStream input = new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(compressed)))) {
+                if (input.readUnsignedByte() != 10) throw new IOException("Schematic root tag was not a compound.");
+                input.readUTF(); // root name
+                int width = 0, height = 0, length = 0;
+                byte[] blockData = null;
+                Map<String, Integer> palette = new HashMap<>();
+                while (true) {
+                    int type = input.readUnsignedByte();
+                    if (type == 0) break;
+                    String name = input.readUTF();
+                    if (type == 2 && (name.equals("Width") || name.equals("Height") || name.equals("Length"))) {
+                        int value = input.readShort();
+                        if (name.equals("Width")) width = value;
+                        else if (name.equals("Height")) height = value;
+                        else if (name.equals("Length")) length = value;
+                    } else if (type == 3) {
+                        int value = input.readInt();
+                        if (name.equals("Width")) width = value;
+                        else if (name.equals("Height")) height = value;
+                        else if (name.equals("Length")) length = value;
+                    } else if (type == 10 && name.equals("Palette")) {
+                        readSchematicPalette(input, palette);
+                    } else if (type == 7 && name.equals("BlockData")) {
+                        int size = input.readInt();
+                        if (size < 0 || size > 32_000_000) throw new IOException("Invalid schematic block data length: " + size);
+                        blockData = input.readNBytes(size);
+                        if (blockData.length != size) throw new IOException("Schematic block data ended unexpectedly.");
                     } else {
-                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), air);
+                        skipSchematicTag(input, type);
                     }
                 }
-            }
-        }
-
-        for (int x = RACE_START_X; x <= RACE_START_X + 2; x++) {
-            for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
-                int center = raceLaneZ(lane);
-                for (int z = center - 1; z <= center + 1; z++) {
-                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z),
-                            ((x + z) & 1) == 0 ? Blocks.CONCRETE.lime().defaultBlockState()
-                                    : Blocks.CONCRETE.white().defaultBlockState());
+                Integer packedIceId = palette.get("minecraft:packed_ice");
+                if (width <= 0 || height <= 0 || length <= 0 || blockData == null || packedIceId == null) {
+                    throw new IOException("Schematic is missing dimensions, packed ice palette, or block data.");
                 }
-            }
-        }
-        for (int x = RACE_FINISH_X - 2; x <= RACE_FINISH_X + 2; x++) {
-            for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
-                int center = raceLaneZ(lane);
-                for (int z = center - 1; z <= center + 1; z++) {
-                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z),
-                            ((x + z) & 1) == 0 ? Blocks.CONCRETE.yellow().defaultBlockState()
-                                    : Blocks.CONCRETE.black().defaultBlockState());
+                List<BlockPos> iceBlocks = new ArrayList<>();
+                int cursor = 0;
+                int index = 0;
+                int expectedBlocks = width * height * length;
+                while (cursor < blockData.length && index < expectedBlocks) {
+                    int value = 0;
+                    int shift = 0;
+                    int next;
+                    do {
+                        if (cursor >= blockData.length || shift > 28) throw new IOException("Invalid schematic block varint.");
+                        next = blockData[cursor++] & 0xff;
+                        value |= (next & 0x7f) << shift;
+                        shift += 7;
+                    } while ((next & 0x80) != 0);
+                    if (value == packedIceId) {
+                        int x = index % width;
+                        int z = (index / width) % length;
+                        int y = index / (width * length);
+                        iceBlocks.add(new BlockPos(x, y, z));
+                    }
+                    index++;
                 }
+                if (index != expectedBlocks) throw new IOException("Schematic block count does not match dimensions.");
+                return new RaceSchematic(width, height, length, iceBlocks);
             }
-        }
-        for (int z = minZ; z <= maxZ; z++) {
-            eventLevel.setBlockAndUpdate(new BlockPos(RACE_START_X + 2, FLOOR_Y + 4, z), rail);
-            eventLevel.setBlockAndUpdate(new BlockPos(RACE_FINISH_X - 1, FLOOR_Y + 4, z), rail);
+        } catch (Exception e) {
+            PartyGamesMod.LOGGER.error("Could not parse the bundled Boat Race schematic.", e);
+            return null;
         }
     }
 
-    private BlockState raceSurface(int offset, int x, int z, BlockState ice) {
-        if (offset >= RACE_JUMP_OFFSETS[0] && offset <= RACE_JUMP_OFFSETS[0] + 4
-                || offset >= RACE_JUMP_OFFSETS[1] && offset <= RACE_JUMP_OFFSETS[1] + 4) {
-            return Blocks.SLIME_BLOCK.defaultBlockState();
+    private static void readSchematicPalette(DataInputStream input, Map<String, Integer> palette) throws IOException {
+        while (true) {
+            int type = input.readUnsignedByte();
+            if (type == 0) return;
+            String name = input.readUTF();
+            if (type == 3) palette.put(name, input.readInt());
+            else skipSchematicTag(input, type);
         }
-        for (int[] zone : RACE_HONEY_ZONES) {
-            if (offset >= zone[0] && offset <= zone[1]) return Blocks.HONEY_BLOCK.defaultBlockState();
-        }
-        return ice;
     }
 
-    private int raceLaneZ(int lane) {
-        return RACE_FIRST_LANE_Z + lane * RACE_LANE_SPACING;
+    private static void skipSchematicTag(DataInputStream input, int type) throws IOException {
+        switch (type) {
+            case 1 -> input.readByte();
+            case 2 -> input.readShort();
+            case 3 -> input.readInt();
+            case 4 -> input.readLong();
+            case 5 -> input.readFloat();
+            case 6 -> input.readDouble();
+            case 7 -> {
+                int size = input.readInt();
+                if (size < 0) throw new IOException("Negative NBT byte array size.");
+                input.skipNBytes(size);
+            }
+            case 8 -> input.readUTF();
+            case 9 -> {
+                int elementType = input.readUnsignedByte();
+                int size = input.readInt();
+                if (size < 0) throw new IOException("Negative NBT list size.");
+                for (int i = 0; i < size; i++) skipSchematicTag(input, elementType);
+            }
+            case 10 -> {
+                while (true) {
+                    int nestedType = input.readUnsignedByte();
+                    if (nestedType == 0) break;
+                    input.readUTF();
+                    skipSchematicTag(input, nestedType);
+                }
+            }
+            case 11 -> {
+                int size = input.readInt();
+                if (size < 0) throw new IOException("Negative NBT int array size.");
+                input.skipNBytes((long) size * Integer.BYTES);
+            }
+            case 12 -> {
+                int size = input.readInt();
+                if (size < 0) throw new IOException("Negative NBT long array size.");
+                input.skipNBytes((long) size * Long.BYTES);
+            }
+            default -> throw new IOException("Unknown NBT tag type " + type);
+        }
+    }
+
+    private static final class RaceSchematic {
+        private final int width;
+        private final int height;
+        private final int length;
+        private final List<BlockPos> packedIceBlocks;
+
+        private RaceSchematic(int width, int height, int length, List<BlockPos> packedIceBlocks) {
+            this.width = width;
+            this.height = height;
+            this.length = length;
+            this.packedIceBlocks = packedIceBlocks;
+        }
     }
 
     private boolean isOakBoat(Entity entity) {
@@ -1012,6 +1186,8 @@ public final class PartyGamesManager {
             if (boat == null || start == null || boat.isRemoved()) continue;
             boat.setDeltaMovement(Vec3.ZERO);
             boat.setPos(start.x, start.y, start.z);
+            boat.setYRot(-90.0F);
+            boat.setXRot(0.0F);
             ServerPlayer player = eventLevel.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player != null && player.getVehicle() != boat) player.startRiding(boat, true, true);
         }
@@ -1023,7 +1199,7 @@ public final class PartyGamesManager {
             if (player == null) continue;
             player.sendSystemMessage(Component.literal(value)
                     .withStyle(style -> style.withColor(ChatFormatting.GOLD).withBold(true)));
-            playRaceSound(player, "minecraft:block.note_block.pling", 0.8F, 0.65F + (pitchStep * 0.2F));
+            playRaceSound(player, "minecraft:block.note_block.pling", 0.8F, 0.65F + (pitchStep * 0.12F));
         }
     }
 
@@ -1034,7 +1210,7 @@ public final class PartyGamesManager {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             Entity boat = raceBoats.get(uuid);
             if (player != null) {
-                player.sendSystemMessage(Component.literal("GO! GO! GO!")
+                player.sendSystemMessage(Component.literal("¡YA! ¡A CORRER!")
                         .withStyle(style -> style.withColor(ChatFormatting.GREEN).withBold(true)));
                 playRaceSound(player, "minecraft:entity.player.levelup", 0.9F, 1.2F);
             }
@@ -1052,7 +1228,6 @@ public final class PartyGamesManager {
             Entity boat = raceBoats.get(uuid);
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (boat == null || boat.isRemoved() || player == null) continue;
-
             if (raceFinishOrder.contains(uuid)) {
                 boat.setDeltaMovement(Vec3.ZERO);
                 continue;
@@ -1060,37 +1235,42 @@ public final class PartyGamesManager {
             if (player.getVehicle() != boat) player.startRiding(boat, true, true);
 
             double currentX = boat.getX();
-            double previousX = raceLastX.getOrDefault(uuid, RACE_START_X - 4.0D);
-            int jumpStage = raceJumpStage.getOrDefault(uuid, 0);
-            if (jumpStage < RACE_JUMP_OFFSETS.length) {
-                double jumpX = RACE_START_X + RACE_JUMP_OFFSETS[jumpStage];
-                if (previousX < jumpX && currentX >= jumpX) {
-                    Vec3 velocity = boat.getDeltaMovement();
-                    boat.setDeltaMovement(velocity.x, Math.max(0.58D, velocity.y), velocity.z);
-                    raceJumpStage.put(uuid, jumpStage + 1);
-                    player.sendSystemMessage(Component.literal("SLIME JUMP!")
-                            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
-                    playRaceSound(player, "minecraft:entity.slime.jump", 0.8F, 1.0F);
-                }
+            double currentZ = boat.getZ();
+            double previousX = raceLastX.getOrDefault(uuid, RACE_TRACK_ORIGIN_X + RACE_START_LOCAL_X + 0.5D);
+            double previousZ = raceLastZ.getOrDefault(uuid, RACE_TRACK_ORIGIN_Z + RACE_START_LOCAL_Z + 0.5D);
+            double traveled = Math.hypot(currentX - previousX, currentZ - previousZ);
+            double totalDistance = raceDistance.getOrDefault(uuid, 0.0D) + traveled;
+            raceDistance.put(uuid, totalDistance);
+
+            int localZ = (int) Math.floor(currentZ - RACE_TRACK_ORIGIN_Z);
+            int previousLocalZ = (int) Math.floor(previousZ - RACE_TRACK_ORIGIN_Z);
+            if (previousLocalZ < RACE_SLIME_LOCAL_Z_START && localZ >= RACE_SLIME_LOCAL_Z_START
+                    && currentX >= RACE_TRACK_ORIGIN_X + 96 && currentX <= RACE_TRACK_ORIGIN_X + 104) {
+                Vec3 velocity = boat.getDeltaMovement();
+                boat.setDeltaMovement(velocity.x, Math.max(0.48D, velocity.y), velocity.z);
+                player.sendSystemMessage(Component.literal("¡SALTO DE SLIME!")
+                        .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+                playRaceSound(player, "minecraft:entity.slime.jump", 0.8F, 1.0F);
             }
 
-            int offset = (int) Math.floor(currentX - RACE_START_X);
-            for (int[] zone : RACE_HONEY_ZONES) {
-                if (offset >= zone[0] && offset <= zone[1]) {
-                    Vec3 velocity = boat.getDeltaMovement();
-                    boat.setDeltaMovement(velocity.x * 0.82D, velocity.y, velocity.z * 0.7D);
-                    break;
-                }
-            }
-            raceLastX.put(uuid, currentX);
-            if (currentX >= RACE_FINISH_X) {
+            // Place the line on the top straight at the shared start X. Racers start exactly
+            // on this X coordinate, so the initial movement does not count; returning from the
+            // circuit crosses it again eastbound and completes the lap.
+            double finishLineX = RACE_TRACK_ORIGIN_X + RACE_FINISH_LINE_LOCAL_X + 0.5D;
+            double finishLocalZ = currentZ - RACE_TRACK_ORIGIN_Z;
+            if (previousX < finishLineX && currentX >= finishLineX
+                    && finishLocalZ >= RACE_FINISH_MIN_LOCAL_Z && finishLocalZ <= RACE_FINISH_MAX_LOCAL_Z
+                    && totalDistance > 100.0D) {
                 raceFinishOrder.add(uuid);
                 boat.setDeltaMovement(Vec3.ZERO);
-                player.sendSystemMessage(Component.literal("You finished in place #" + raceFinishOrder.size() + "!")
+                player.sendSystemMessage(Component.literal("¡Llegaste! Puesto #" + raceFinishOrder.size() + ".")
                         .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
                 playRaceSound(player, "minecraft:ui.toast.challenge_complete", 0.8F, 1.0F);
-                broadcast(server, player.getGameProfile().name() + " finished the Boat Race in place #" + raceFinishOrder.size() + ".");
+                broadcast(server, player.getGameProfile().name() + " finished Boat Race in place #" + raceFinishOrder.size() + ".");
             }
+
+            raceLastX.put(uuid, currentX);
+            raceLastZ.put(uuid, currentZ);
         }
 
         if (!joinedPlayers.isEmpty() && raceFinishOrder.size() >= joinedPlayers.size()) {
@@ -1128,8 +1308,7 @@ public final class PartyGamesManager {
     }
 
     private double raceProgress(UUID uuid) {
-        Entity boat = raceBoats.get(uuid);
-        return boat == null || boat.isRemoved() ? RACE_START_X : boat.getX();
+        return raceDistance.getOrDefault(uuid, 0.0D);
     }
 
     private void playRaceSound(ServerPlayer player, String soundName, float volume, float pitch) {
@@ -1145,8 +1324,8 @@ public final class PartyGamesManager {
         raceBoats.clear();
         raceBoatSpawnPositions.clear();
         raceLastX.clear();
-        raceJumpStage.clear();
-        raceLaneByPlayer.clear();
+        raceLastZ.clear();
+        raceDistance.clear();
     }
 
     public void cancelEvent(MinecraftServer server) {
