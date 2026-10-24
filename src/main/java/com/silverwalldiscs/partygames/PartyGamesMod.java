@@ -52,6 +52,14 @@ public final class PartyGamesMod implements ModInitializer {
         return manager != null && manager.isProtected(uuid);
     }
 
+    public boolean capturePendingPrizeCommand(ServerPlayer player, String command) {
+        return manager != null && manager.capturePendingPrizeCommand(player, command);
+    }
+
+    public boolean isCommandsBlocked(ServerPlayer player) {
+        return manager != null && manager.isCommandsBlocked(player);
+    }
+
     @Override
     public void onInitialize() {
         instance = this;
@@ -74,7 +82,7 @@ public final class PartyGamesMod implements ModInitializer {
         registerCommands();
         registerProtection();
         ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) ->
-                !manager.capturePendingPrizeCommand(sender, message.getContent()));
+                !manager.capturePendingPrizeCommand(sender, message.signedContent()));
         ServerTickEvents.END_SERVER_TICK.register(manager::tick);
         ServerLifecycleEvents.SERVER_STARTED.register(manager::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(manager::onServerStopping);
