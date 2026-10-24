@@ -2,6 +2,7 @@
   "required": true,
   "package": "com.silverwalldiscs.partygames.mixin",
   "compatibilityLevel": "JAVA_25",
+  "refmap": "partygames.refmap.json",
   "mixins": [
     "PlayerDropMixin",
     "ProtectedPlayerMixin"
