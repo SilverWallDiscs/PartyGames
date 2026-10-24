@@ -611,6 +611,14 @@ public final class PartyGamesManager {
         // Minecraft saves player state on disconnect, which can strand them after rejoining.
         player.setGameMode(GameType.SURVIVAL);
         player.setPermanentlyInvulnerable(false);
+        // Keep the server's ability flags consistent with Survival even if this player
+        // disconnected while an older build had left mayBuild=false in the saved data.
+        // Interaction callbacks and mixins, not mayBuild=false, enforce the minigame lock.
+        player.getAbilities().mayBuild = true;
+        player.getAbilities().instabuild = false;
+        player.getAbilities().mayfly = false;
+        player.getAbilities().flying = false;
+        player.onUpdateAbilities();
 
         BlockPos spawn = spawnPositions.isEmpty()
                 ? new BlockPos(0, FLOOR_Y + 1, 0)
@@ -1064,10 +1072,15 @@ public final class PartyGamesManager {
         player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch, true);
         GameType restoredGameMode = GameType.byName(point.gameMode, GameType.SURVIVAL);
         player.setGameMode(restoredGameMode);
-        player.setPermanentlyInvulnerable(point.invulnerable);
 
-        // Older builds stored mayBuild=false in some return snapshots. In Survival and
-        // Creative this is invalid and can leave the server refusing block interaction.
+        // Older builds could save both permanent invulnerability and mayBuild=false after
+        // the minigame had already modified the player. Treat that combination in Survival
+        // as corrupted event state instead of restoring it as the player's baseline.
+        boolean legacyCorruptSurvivalSnapshot = restoredGameMode.isSurvival() && !point.mayBuild;
+        player.setPermanentlyInvulnerable(point.invulnerable && !legacyCorruptSurvivalSnapshot);
+
+        // In Survival and Creative, mayBuild=false is invalid and can leave the server
+        // refusing block interaction.
         player.getAbilities().mayBuild = point.mayBuild
                 || restoredGameMode.isSurvival()
                 || restoredGameMode.isCreative();
