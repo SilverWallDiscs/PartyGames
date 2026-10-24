@@ -232,7 +232,7 @@ public final class PartyGamesManager {
     private void openAdminMenu(ServerPlayer player, PartyGamesAdminMenu.View view, int place, int page) {
         int size = (view == PartyGamesAdminMenu.View.MAIN || view == PartyGamesAdminMenu.View.PLACES) ? 27 : 54;
         PartyGamesAdminMenu.AdminContainer container = new PartyGamesAdminMenu.AdminContainer(size, view);
-        ItemStack filler = menuItem(Items.BLACK_STAINED_GLASS_PANE, " ");
+        ItemStack filler = menuItem(Blocks.STAINED_GLASS_PANE.black().asItem(), " ");
         for (int slot = 0; slot < size; slot++) {
             if (view == PartyGamesAdminMenu.View.ITEMS && slot >= 9 && slot <= 35) continue;
             container.setItem(slot, filler.copy());
