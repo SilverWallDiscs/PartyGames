@@ -152,7 +152,6 @@ public final class PartyGamesManager {
             if (player != null && player.level() == eventLevel) {
                 player.getFoodData().setFoodLevel(20);
                 player.getFoodData().setSaturation(20.0F);
-                player.getFoodData().setExhaustion(0.0F);
             }
         }
 
