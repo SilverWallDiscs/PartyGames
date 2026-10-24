@@ -1,0 +1,7 @@
+# Gradle
+.gradle/
+build/
+out/
+run/
+*.hprof
+hs_err_*.log

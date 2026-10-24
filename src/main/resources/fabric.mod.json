@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "partygames",
+  "version": "${version}",
+  "name": "PartyGames",
+  "description": "Recurring server-side minigame events with configurable prizes. First game: Dance Floor.",
+  "authors": ["SilverWallDiscs"],
+  "contact": {
+    "sources": "https://github.com/SilverWallDiscs/PartyGames"
+  },
+  "license": "MIT",
+  "environment": "server",
+  "entrypoints": {
+    "main": [
+      "com.silverwalldiscs.partygames.PartyGamesMod"
+    ]
+  },
+  "mixins": [
+    "partygames.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
