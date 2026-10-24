@@ -82,7 +82,7 @@ public final class PartyGamesManager {
     private static final int RACE_TRACK_LENGTH = 250;
     private static final int RACE_MAX_PLAYERS = 16;
     private static final int RACE_START_LOCAL_X = 96;
-    private static final int RACE_START_LOCAL_Z = -4;
+    private static final int RACE_START_LOCAL_Z = 1;
     private static final int RACE_START_SURFACE_LOCAL_Y = 5;
     private static final int RACE_FINISH_MIN_LOCAL_X = 45;
     private static final int RACE_FINISH_MAX_LOCAL_X = 145;
@@ -982,7 +982,6 @@ public final class PartyGamesManager {
             if (!eventLevel.getBlockState(pos).equals(ice)) eventLevel.setBlock(pos, ice, 2);
         }
 
-        prepareRaceStartPlatform();
         overlayRaceObstacles(schematic);
         raceTrackPrepared = true;
         PartyGamesMod.LOGGER.info(
@@ -996,24 +995,6 @@ public final class PartyGamesManager {
         for (int x = minX; x <= maxX; x++) {
             for (int z = minZ; z <= maxZ; z++) {
                 for (int y = minY; y <= maxY; y++) {
-                    pos.set(x, y, z);
-                    if (!eventLevel.getBlockState(pos).isAir()) eventLevel.setBlock(pos, air, 2);
-                }
-            }
-        }
-    }
-
-    private void prepareRaceStartPlatform() {
-        int topY = RACE_TRACK_ORIGIN_Y + RACE_START_SURFACE_LOCAL_Y;
-        BlockState ice = Blocks.PACKED_ICE.defaultBlockState();
-        BlockState air = Blocks.AIR.defaultBlockState();
-        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        // Flat approach joins the upper straight of the schematic. All racers occupy one exact point.
-        for (int x = RACE_TRACK_ORIGIN_X + 48; x <= RACE_TRACK_ORIGIN_X + 143; x++) {
-            for (int z = RACE_TRACK_ORIGIN_Z - 8; z <= RACE_TRACK_ORIGIN_Z - 1; z++) {
-                pos.set(x, topY, z);
-                if (!eventLevel.getBlockState(pos).equals(ice)) eventLevel.setBlock(pos, ice, 2);
-                for (int y = topY + 1; y <= topY + 3; y++) {
                     pos.set(x, y, z);
                     if (!eventLevel.getBlockState(pos).isAir()) eventLevel.setBlock(pos, air, 2);
                 }
@@ -1070,7 +1051,12 @@ public final class PartyGamesManager {
                     int type = input.readUnsignedByte();
                     if (type == 0) break;
                     String name = input.readUTF();
-                    if (type == 3) {
+                    if (type == 2 && (name.equals("Width") || name.equals("Height") || name.equals("Length"))) {
+                        int value = input.readShort();
+                        if (name.equals("Width")) width = value;
+                        else if (name.equals("Height")) height = value;
+                        else if (name.equals("Length")) length = value;
+                    } else if (type == 3) {
                         int value = input.readInt();
                         if (name.equals("Width")) width = value;
                         else if (name.equals("Height")) height = value;
