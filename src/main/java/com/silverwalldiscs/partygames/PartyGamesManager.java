@@ -149,6 +149,228 @@ public final class PartyGamesManager {
                 + " | completed dance rounds: " + completedRounds;
     }
 
+    public void openModifyMenu(ServerPlayer player) {
+        openAdminMenu(player, PartyGamesAdminMenu.View.MAIN, 0, 0);
+    }
+
+    public void addPrizeCommand(ServerPlayer player, int place, String command) {
+        if (place < 1 || place > 3) {
+            player.sendSystemMessage(Component.literal("Prize place must be 1, 2 or 3.").withStyle(ChatFormatting.RED));
+            return;
+        }
+        if (command == null || command.isBlank()) {
+            player.sendSystemMessage(Component.literal("Enter a command after the place number.").withStyle(ChatFormatting.RED));
+            return;
+        }
+        String value = command.trim();
+        while (value.startsWith("/")) value = value.substring(1);
+        PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+        if (prize == null) return;
+        prize.commands.add(value);
+        updateConfig(config);
+        player.sendSystemMessage(Component.literal("Added command to the " + placeName(place) + " prize.").withStyle(ChatFormatting.GREEN));
+        openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, Math.max(0, (prize.commands.size() - 1) / 45));
+    }
+
+    private void openAdminMenu(ServerPlayer player, PartyGamesAdminMenu.View view, int place, int page) {
+        int size = (view == PartyGamesAdminMenu.View.MAIN || view == PartyGamesAdminMenu.View.PLACES) ? 27 : 54;
+        PartyGamesAdminMenu.AdminContainer container = new PartyGamesAdminMenu.AdminContainer(size, view);
+        ItemStack filler = menuItem(Items.GRAY_STAINED_GLASS_PANE, " ");
+        for (int slot = 0; slot < size; slot++) container.setItem(slot, filler.copy());
+
+        MinecraftServer server = player.level().getServer();
+        String title;
+        switch (view) {
+            case MAIN -> {
+                title = "PartyGames - Admin";
+                container.setItem(13, menuItem(Items.JUKEBOX, "Dance Floor - configure"));
+                container.setItem(22, menuItem(Items.BOOK, "Choose a minigame"));
+            }
+            case PLACES -> {
+                title = "Dance Floor - Rewards";
+                container.setItem(11, menuItem(Items.GOLD_INGOT, "First place - items and commands"));
+                container.setItem(13, menuItem(Items.IRON_INGOT, "Second place - items and commands"));
+                container.setItem(15, menuItem(Items.COPPER_INGOT, "Third place - items and commands"));
+                container.setItem(22, menuItem(Items.ARROW, "Back to minigames"));
+            }
+            case ITEMS -> {
+                title = placeName(place) + " - Reward items";
+                PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+                if (prize != null) {
+                    int first = Math.max(0, page) * 9;
+                    for (int slot = 0; slot < 9 && first + slot < prize.items.size(); slot++) {
+                        ItemStack display = createStack(server, prize.items.get(first + slot));
+                        if (!display.isEmpty()) container.setItem(slot, display);
+                    }
+                }
+                container.setItem(45, menuItem(Items.LIME_DYE, "Save added items"));
+                container.setItem(46, menuItem(Items.BARRIER, "Remove all configured item rewards"));
+                container.setItem(47, menuItem(Items.COMMAND_BLOCK, "View / add / remove commands"));
+                container.setItem(49, menuItem(Items.ARROW, "Back to prize places"));
+                container.setItem(50, menuItem(Items.SPECTRAL_ARROW, "Previous item page"));
+                container.setItem(51, menuItem(Items.ARROW, "Next item page"));
+                container.setItem(53, menuItem(Items.BOOK, "Put items in slots 10-36, then Save"));
+            }
+            case COMMANDS -> {
+                title = placeName(place) + " - Reward commands";
+                PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+                if (prize != null) {
+                    int first = Math.max(0, page) * 45;
+                    for (int slot = 0; slot < 45 && first + slot < prize.commands.size(); slot++) {
+                        String command = prize.commands.get(first + slot);
+                        String shown = command.length() > 58 ? command.substring(0, 55) + "..." : command;
+                        container.setItem(slot, menuItem(Items.PAPER, "Click to remove: " + shown));
+                    }
+                }
+                container.setItem(45, menuItem(Items.WRITABLE_BOOK, "Add a command"));
+                container.setItem(46, menuItem(Items.ARROW, "Back to reward items"));
+                container.setItem(47, menuItem(Items.SPECTRAL_ARROW, "Previous command page"));
+                container.setItem(48, menuItem(Items.ARROW, "Next command page"));
+                container.setItem(50, menuItem(Items.BOOK, "Click a command to remove it"));
+            }
+            default -> throw new IllegalStateException("Unknown PartyGames menu " + view);
+        }
+
+        PartyGamesAdminMenu.open(player, this, view, place, Math.max(0, page), container, title);
+    }
+
+    private ItemStack menuItem(Item item, String name) {
+        ItemStack stack = new ItemStack(item);
+        stack.set(DataComponents.CUSTOM_NAME, Component.literal(name));
+        return stack;
+    }
+
+    private String placeName(int place) {
+        return switch (place) {
+            case 1 -> "First place";
+            case 2 -> "Second place";
+            case 3 -> "Third place";
+            default -> "Prize";
+        };
+    }
+
+    void handleAdminMenuClick(ServerPlayer player, PartyGamesAdminMenu.View view, int place, int page,
+                              int slot, int button, PartyGamesAdminMenu.AdminContainer container) {
+        switch (view) {
+            case MAIN -> {
+                if (slot == 13) openAdminMenu(player, PartyGamesAdminMenu.View.PLACES, 0, 0);
+            }
+            case PLACES -> {
+                if (slot == 11) openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, 1, 0);
+                else if (slot == 13) openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, 2, 0);
+                else if (slot == 15) openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, 3, 0);
+                else if (slot == 22) openAdminMenu(player, PartyGamesAdminMenu.View.MAIN, 0, 0);
+            }
+            case ITEMS -> {
+                PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+                if (prize == null) return;
+                if (slot >= 0 && slot <= 8) {
+                    int index = page * 9 + slot;
+                    if (index < prize.items.size()) {
+                        PartyGamesConfig.ItemReward removed = prize.items.remove(index);
+                        updateConfig(config);
+                        player.sendSystemMessage(Component.literal("Removed configured item reward: " + removed.id)
+                                .withStyle(ChatFormatting.YELLOW));
+                        openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place,
+                                Math.min(page, Math.max(0, (prize.items.size() - 1) / 9)));
+                    }
+                } else if (slot == 45) {
+                    saveAddedRewardItems(player, place, container);
+                } else if (slot == 46) {
+                    returnUncommittedItems(player, container);
+                    prize.items.clear();
+                    updateConfig(config);
+                    player.sendSystemMessage(Component.literal("Removed all configured item rewards for " + placeName(place) + ".")
+                            .withStyle(ChatFormatting.YELLOW));
+                    openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place, 0);
+                } else if (slot == 47) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, 0);
+                } else if (slot == 49) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.PLACES, 0, 0);
+                } else if (slot == 50 && page > 0) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place, page - 1);
+                } else if (slot == 51 && (page + 1) * 9 < prize.items.size()) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place, page + 1);
+                } else if (slot == 53) {
+                    player.sendSystemMessage(Component.literal("Shift-click items from your inventory into the empty middle slots. They are saved as exact item stacks, including custom components, then returned to you.")
+                            .withStyle(ChatFormatting.GRAY));
+                }
+            }
+            case COMMANDS -> {
+                PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+                if (prize == null) return;
+                if (slot >= 0 && slot < 45) {
+                    int index = page * 45 + slot;
+                    if (index < prize.commands.size()) {
+                        String removed = prize.commands.remove(index);
+                        updateConfig(config);
+                        player.sendSystemMessage(Component.literal("Removed reward command: " + removed)
+                                .withStyle(ChatFormatting.YELLOW));
+                        openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place,
+                                Math.min(page, Math.max(0, (prize.commands.size() - 1) / 45)));
+                    }
+                } else if (slot == 45) {
+                    Component prompt = Component.literal("Click here to enter a command for " + placeName(place)
+                                    + ". Commands run as the winner, so @s targets them and @p resolves nearest to them: ")
+                            .withStyle(ChatFormatting.LIGHT_PURPLE)
+                            .append(Component.literal("/partygames modify addcommand " + place + " ")
+                                    .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
+                                            .withClickEvent(new ClickEvent.SuggestCommand("/partygames modify addcommand " + place + " "))));
+                    player.sendSystemMessage(prompt);
+                } else if (slot == 46) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place, 0);
+                } else if (slot == 47 && page > 0) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, page - 1);
+                } else if (slot == 48 && (page + 1) * 45 < prize.commands.size()) {
+                    openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, page + 1);
+                }
+            }
+        }
+    }
+
+    private void saveAddedRewardItems(ServerPlayer player, int place, PartyGamesAdminMenu.AdminContainer container) {
+        PartyGamesConfig.Prize prize = config.prizeForPlace(place);
+        if (prize == null) return;
+        int added = 0;
+        MinecraftServer server = player.level().getServer();
+        for (int slot = 9; slot <= 35; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (stack.isEmpty()) continue;
+            ItemStack savedStack = stack.copy();
+            String itemId = BuiltInRegistries.ITEM.getKey(savedStack.getItem()).toString();
+            JsonElement stackData = ItemStack.CODEC.encodeStart(
+                            server.registryAccess().createSerializationContext(JsonOps.INSTANCE), savedStack)
+                    .resultOrPartial(error -> PartyGamesMod.LOGGER.warn("Could not encode reward item {}: {}", itemId, error))
+                    .orElse(null);
+            prize.items.add(new PartyGamesConfig.ItemReward(itemId, savedStack.getCount(), stackData));
+            added++;
+
+            returnItemToPlayer(player, savedStack.copy());
+            container.setItem(slot, ItemStack.EMPTY);
+        }
+        updateConfig(config);
+        PartyGamesAdminMenu current = player.containerMenu instanceof PartyGamesAdminMenu menu ? menu : null;
+        if (current != null) current.markCommitted();
+        player.closeContainer();
+        player.sendSystemMessage(Component.literal("Saved " + added + " reward item stack(s), including custom data, for " + placeName(place) + ".")
+                .withStyle(ChatFormatting.GREEN));
+    }
+
+    void returnUncommittedItems(ServerPlayer player, PartyGamesAdminMenu.AdminContainer container) {
+        for (int slot = 9; slot <= 35; slot++) {
+            ItemStack stack = container.getItem(slot);
+            if (stack.isEmpty()) continue;
+            returnItemToPlayer(player, stack.copy());
+            container.setItem(slot, ItemStack.EMPTY);
+        }
+    }
+
+    private void returnItemToPlayer(ServerPlayer player, ItemStack stack) {
+        if (stack.isEmpty()) return;
+        player.getInventory().add(stack);
+        if (!stack.isEmpty()) player.drop(stack, false);
+    }
+
     public void onServerStarted(MinecraftServer server) {
         loadPersistentData();
         nextAutomaticEventAt = System.currentTimeMillis() + config.eventIntervalMinutes * 60_000L;
