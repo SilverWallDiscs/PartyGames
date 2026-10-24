@@ -2,6 +2,7 @@ package com.silverwalldiscs.partygames;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonElement;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -126,18 +127,21 @@ public final class PartyGamesConfig {
         static Prize defaultFirst() {
             Prize prize = new Prize();
             prize.items.add(new ItemReward("minecraft:diamond", 8));
+            prize.commands.add("playsound minecraft:entity.firework_rocket.large_blast master @s ~ ~ ~ 1 1");
             return prize;
         }
 
         static Prize defaultSecond() {
             Prize prize = new Prize();
             prize.items.add(new ItemReward("minecraft:diamond", 4));
+            prize.commands.add("give @p minecraft:gold_ingot 8");
             return prize;
         }
 
         static Prize defaultThird() {
             Prize prize = new Prize();
             prize.items.add(new ItemReward("minecraft:diamond", 2));
+            prize.commands.add("give @s minecraft:iron_ingot 16");
             return prize;
         }
     }
@@ -145,6 +149,8 @@ public final class PartyGamesConfig {
     public static final class ItemReward {
         public String id;
         public int count;
+        // Full ItemStack codec data preserves custom components, names, enchantments and other item data.
+        public JsonElement stackData;
 
         public ItemReward() {
         }
@@ -152,6 +158,12 @@ public final class PartyGamesConfig {
         public ItemReward(String id, int count) {
             this.id = id;
             this.count = count;
+        }
+
+        public ItemReward(String id, int count, JsonElement stackData) {
+            this.id = id;
+            this.count = count;
+            this.stackData = stackData;
         }
     }
 }
