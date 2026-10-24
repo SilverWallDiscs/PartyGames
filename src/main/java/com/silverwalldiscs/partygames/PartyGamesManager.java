@@ -34,14 +34,13 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Relative;
+import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -55,22 +54,22 @@ public final class PartyGamesManager {
     private static final Random RANDOM = new Random();
 
     private static final List<BlockState> DANCE_COLORS = List.of(
-            Blocks.WHITE_CONCRETE.defaultBlockState(),
-            Blocks.ORANGE_CONCRETE.defaultBlockState(),
-            Blocks.MAGENTA_CONCRETE.defaultBlockState(),
-            Blocks.LIGHT_BLUE_CONCRETE.defaultBlockState(),
-            Blocks.YELLOW_CONCRETE.defaultBlockState(),
-            Blocks.LIME_CONCRETE.defaultBlockState(),
-            Blocks.PINK_CONCRETE.defaultBlockState(),
-            Blocks.GRAY_CONCRETE.defaultBlockState(),
-            Blocks.LIGHT_GRAY_CONCRETE.defaultBlockState(),
-            Blocks.CYAN_CONCRETE.defaultBlockState(),
-            Blocks.PURPLE_CONCRETE.defaultBlockState(),
-            Blocks.BLUE_CONCRETE.defaultBlockState(),
-            Blocks.BROWN_CONCRETE.defaultBlockState(),
-            Blocks.GREEN_CONCRETE.defaultBlockState(),
-            Blocks.RED_CONCRETE.defaultBlockState(),
-            Blocks.BLACK_CONCRETE.defaultBlockState()
+            Blocks.CONCRETE.white().defaultBlockState(),
+            Blocks.CONCRETE.orange().defaultBlockState(),
+            Blocks.CONCRETE.magenta().defaultBlockState(),
+            Blocks.CONCRETE.lightBlue().defaultBlockState(),
+            Blocks.CONCRETE.yellow().defaultBlockState(),
+            Blocks.CONCRETE.lime().defaultBlockState(),
+            Blocks.CONCRETE.pink().defaultBlockState(),
+            Blocks.CONCRETE.gray().defaultBlockState(),
+            Blocks.CONCRETE.lightGray().defaultBlockState(),
+            Blocks.CONCRETE.cyan().defaultBlockState(),
+            Blocks.CONCRETE.purple().defaultBlockState(),
+            Blocks.CONCRETE.blue().defaultBlockState(),
+            Blocks.CONCRETE.brown().defaultBlockState(),
+            Blocks.CONCRETE.green().defaultBlockState(),
+            Blocks.CONCRETE.red().defaultBlockState(),
+            Blocks.CONCRETE.black().defaultBlockState()
     );
 
     private enum Phase {
@@ -232,17 +231,17 @@ public final class PartyGamesManager {
 
     public int join(ServerPlayer player) {
         if (phase != Phase.JOINING) {
-            player.displayClientMessage(Component.literal("There is no PartyGames event accepting players right now.")
-                    .withStyle(ChatFormatting.RED), false);
+            player.sendSystemMessage(Component.literal("There is no PartyGames event accepting players right now.")
+                    .withStyle(ChatFormatting.RED));
             return 0;
         }
         UUID uuid = player.getUUID();
         if (joinedPlayers.contains(uuid)) {
-            player.displayClientMessage(Component.literal("You have already joined this event."), false);
+            player.sendSystemMessage(Component.literal("You have already joined this event."));
             return 1;
         }
         if (joinedPlayers.size() >= 200) {
-            player.displayClientMessage(Component.literal("This event has reached its player limit."), false);
+            player.sendSystemMessage(Component.literal("This event has reached its player limit."));
             return 0;
         }
 
@@ -253,7 +252,7 @@ public final class PartyGamesManager {
         alivePlayers.add(uuid);
         saveSessions();
 
-        player.setInvulnerable(true);
+        player.setPermanentlyInvulnerable(true);
         player.getAbilities().mayBuild = false;
         player.getAbilities().instabuild = false;
         player.getAbilities().mayfly = false;
@@ -264,9 +263,9 @@ public final class PartyGamesManager {
                 ? new BlockPos(0, FLOOR_Y + 1, 0)
                 : spawnPositions.get(nextSpawnIndex++ % spawnPositions.size()).above();
         player.teleportTo(eventLevel, spawn.getX() + 0.5, FLOOR_Y + 1.0, spawn.getZ() + 0.5,
-                Set.of(), player.getYRot(), player.getXRot());
-        player.displayClientMessage(Component.literal("You joined PartyGames: Dance Floor! Your inventory is protected.")
-                .withStyle(ChatFormatting.LIGHT_PURPLE), false);
+                Set.of(), player.getYRot(), player.getXRot(), true);
+        player.sendSystemMessage(Component.literal("You joined PartyGames: Dance Floor! Your inventory is protected.")
+                .withStyle(ChatFormatting.LIGHT_PURPLE));
         return 1;
     }
 
@@ -341,7 +340,7 @@ public final class PartyGamesManager {
     private void beginSeatRush(MinecraftServer server) {
         stopMusic();
         phase = Phase.SEAT_RUSH;
-        paintFloor(Blocks.BLACK_CONCRETE.defaultBlockState());
+        paintFloor(Blocks.CONCRETE.black().defaultBlockState());
         List<BlockPos> available = floorPositions();
         Collections.shuffle(available, RANDOM);
 
@@ -353,7 +352,7 @@ public final class PartyGamesManager {
         seatPositions.clear();
         seatPositions.addAll(available.subList(0, desiredSeats));
         for (BlockPos pos : seatPositions) {
-            eventLevel.setBlockAndUpdate(pos, Blocks.LIME_WOOL.defaultBlockState());
+            eventLevel.setBlockAndUpdate(pos, Blocks.WOOL.lime().defaultBlockState());
         }
 
         phaseEndsAt = System.currentTimeMillis() + config.seatTimeSeconds * 1000L;
@@ -387,8 +386,8 @@ public final class PartyGamesManager {
             eliminationOrder.add(uuid);
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player != null) {
-                player.displayClientMessage(Component.literal("You were eliminated from Dance Floor!")
-                        .withStyle(ChatFormatting.RED), false);
+                player.sendSystemMessage(Component.literal("You were eliminated from Dance Floor!")
+                        .withStyle(ChatFormatting.RED));
                 returnPlayer(server, player);
             } else {
                 joinedPlayers.remove(uuid);
@@ -478,8 +477,8 @@ public final class PartyGamesManager {
         }
         if (saved.items.isEmpty() && saved.commands.isEmpty()) pendingRewards.remove(uuid);
         if (!saved.items.isEmpty()) {
-            player.displayClientMessage(Component.literal("Some prize items did not fit in your inventory. Use /partygames retrieve.")
-                    .withStyle(ChatFormatting.GOLD), false);
+            player.sendSystemMessage(Component.literal("Some prize items did not fit in your inventory. Use /partygames retrieve.")
+                    .withStyle(ChatFormatting.GOLD));
         }
         savePendingRewards();
     }
@@ -488,12 +487,12 @@ public final class PartyGamesManager {
         UUID uuid = player.getUUID();
         PendingReward saved = pendingRewards.get(uuid);
         if (saved == null) {
-            if (showMessages) player.displayClientMessage(Component.literal("You have no pending PartyGames rewards."), false);
+            if (showMessages) player.sendSystemMessage(Component.literal("You have no pending PartyGames rewards."));
             return;
         }
 
         for (String command : new ArrayList<>(saved.commands)) {
-            executeRewardCommand(player.getServer(), command, player.getGameProfile().name(), 0);
+            executeRewardCommand(player.level().getServer(), command, player.getGameProfile().name(), 0);
         }
         saved.commands.clear();
 
@@ -509,11 +508,11 @@ public final class PartyGamesManager {
 
         if (saved.items.isEmpty() && saved.commands.isEmpty()) {
             pendingRewards.remove(uuid);
-            if (showMessages) player.displayClientMessage(Component.literal("All pending PartyGames rewards were delivered.")
-                    .withStyle(ChatFormatting.GREEN), false);
+            if (showMessages) player.sendSystemMessage(Component.literal("All pending PartyGames rewards were delivered.")
+                    .withStyle(ChatFormatting.GREEN));
         } else if (showMessages) {
-            player.displayClientMessage(Component.literal("Some rewards are still pending. Make inventory space and run /partygames retrieve again.")
-                    .withStyle(ChatFormatting.YELLOW), false);
+            player.sendSystemMessage(Component.literal("Some rewards are still pending. Make inventory space and run /partygames retrieve again.")
+                    .withStyle(ChatFormatting.YELLOW));
         }
         savePendingRewards();
     }
@@ -528,7 +527,7 @@ public final class PartyGamesManager {
         if (command.isBlank()) return;
         try {
             server.getCommands().performPrefixedCommand(
-                    server.createCommandSourceStack().withPermission(4), command);
+                    server.createCommandSourceStack().withMaximumPermission(PermissionSet.ALL_PERMISSIONS), command);
         } catch (Exception e) {
             PartyGamesMod.LOGGER.error("Could not execute PartyGames reward command: {}", command, e);
         }
@@ -566,21 +565,21 @@ public final class PartyGamesManager {
         }
         if (destination == null) {
             destination = server.overworld();
-            BlockPos spawn = destination.getSharedSpawnPos();
+            BlockPos spawn = new BlockPos(0, FLOOR_Y, 0);
             point.x = spawn.getX() + 0.5;
             point.y = spawn.getY() + 1.0;
             point.z = spawn.getZ() + 0.5;
         }
 
-        player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch);
-        player.setInvulnerable(point.invulnerable);
+        player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch, true);
+        player.setPermanentlyInvulnerable(point.invulnerable);
         player.getAbilities().mayBuild = point.mayBuild;
         player.getAbilities().instabuild = point.instabuild;
         player.getAbilities().mayfly = point.mayfly;
         player.getAbilities().flying = point.flying && point.mayfly;
         player.onUpdateAbilities();
-        player.displayClientMessage(Component.literal("You have been returned from PartyGames.")
-                .withStyle(ChatFormatting.LIGHT_PURPLE), false);
+        player.sendSystemMessage(Component.literal("You have been returned from PartyGames.")
+                .withStyle(ChatFormatting.LIGHT_PURPLE));
 
         returnPoints.remove(uuid);
         joinedPlayers.remove(uuid);
@@ -590,13 +589,13 @@ public final class PartyGamesManager {
 
     private ReturnPoint snapshot(ServerPlayer player) {
         ReturnPoint point = new ReturnPoint();
-        point.dimension = player.level().dimension().location().toString();
+        point.dimension = player.level().dimension().identifier().toString();
         point.x = player.getX();
         point.y = player.getY();
         point.z = player.getZ();
         point.yaw = player.getYRot();
         point.pitch = player.getXRot();
-        point.invulnerable = player.isInvulnerable();
+        point.invulnerable = player.isPermanentlyInvulnerable();
         point.mayBuild = player.getAbilities().mayBuild;
         point.instabuild = player.getAbilities().instabuild;
         point.mayfly = player.getAbilities().mayfly;
@@ -670,8 +669,7 @@ public final class PartyGamesManager {
 
     private void stopMusic() {
         if (activeMusicId == null) return;
-        ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(
-                Optional.of(activeMusicId), Optional.of(SoundSource.MUSIC));
+        ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(activeMusicId, SoundSource.MUSIC);
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = eventLevel == null ? null : eventLevel.getServer().getPlayerList().getPlayer(uuid);
             if (player != null) player.connection.send(packet);
