@@ -145,6 +145,17 @@ public final class PartyGamesManager {
     }
 
     public void tick(MinecraftServer server) {
+        // Keep event participants fed while they are inside the minigame dimension.
+        // Resetting exhaustion as well prevents sprinting/jumping from consuming hunger.
+        for (UUID uuid : new ArrayList<>(joinedPlayers)) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player != null && player.level() == eventLevel) {
+                player.getFoodData().setFoodLevel(20);
+                player.getFoodData().setSaturation(20.0F);
+                player.getFoodData().setExhaustion(0.0F);
+            }
+        }
+
         long now = System.currentTimeMillis();
 
         if (eventLevel == null) {
