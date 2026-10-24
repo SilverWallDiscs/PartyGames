@@ -3,6 +3,9 @@ package com.silverwalldiscs.partygames;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.mojang.serialization.JsonOps;
 import java.io.Reader;
 import java.io.Writer;
 import java.lang.reflect.Type;
@@ -26,6 +29,7 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -39,6 +43,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.entity.Relative;
 import net.minecraft.server.permissions.PermissionSet;
 import net.minecraft.world.item.Item;
@@ -48,6 +54,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.AABB;
 
 public final class PartyGamesManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -488,11 +495,11 @@ public final class PartyGamesManager {
         }
 
         for (String command : prize.commands) {
-            executeRewardCommand(server, command, name, place);
+            executeRewardCommand(player, command, place);
         }
         for (PartyGamesConfig.ItemReward rewardItem : prize.items) {
             if (rewardItem == null || rewardItem.id == null || rewardItem.count < 1) continue;
-            ItemStack stack = createStack(rewardItem.id, rewardItem.count);
+            ItemStack stack = createStack(server, rewardItem);
             if (stack.isEmpty()) {
                 PartyGamesMod.LOGGER.warn("Ignoring invalid PartyGames reward item id: {}", rewardItem.id);
                 continue;
@@ -517,13 +524,13 @@ public final class PartyGamesManager {
         }
 
         for (String command : new ArrayList<>(saved.commands)) {
-            executeRewardCommand(player.level().getServer(), command, player.getGameProfile().name(), 0);
+            executeRewardCommand(player, command, 0);
         }
         saved.commands.clear();
 
         List<PendingItem> leftovers = new ArrayList<>();
         for (PendingItem reward : saved.items) {
-            ItemStack stack = createStack(reward.id, reward.count);
+            ItemStack stack = createStack(player.level().getServer(), reward.id, reward.count);
             if (stack.isEmpty()) continue;
             player.getInventory().add(stack);
             if (!stack.isEmpty()) leftovers.add(new PendingItem(reward.id, stack.getCount()));
@@ -542,23 +549,44 @@ public final class PartyGamesManager {
         savePendingRewards();
     }
 
-    private void executeRewardCommand(MinecraftServer server, String configuredCommand, String playerName, int place) {
+    private void executeRewardCommand(ServerPlayer player, String configuredCommand, int place) {
         if (configuredCommand == null || configuredCommand.isBlank()) return;
+        String playerName = player.getGameProfile().name();
         String command = configuredCommand
                 .replace("%player%", playerName)
-                .replace("%uuid%", "")
+                .replace("%uuid%", player.getUUID().toString())
                 .replace("%place%", Integer.toString(place));
         while (command.startsWith("/")) command = command.substring(1);
         if (command.isBlank()) return;
         try {
-            server.getCommands().performPrefixedCommand(
-                    server.createCommandSourceStack().withMaximumPermission(PermissionSet.ALL_PERMISSIONS), command);
+            // Execute with the winner as the command entity and position. @s, @p and playsound targets
+            // then resolve relative to the actual winner, while permission still comes from the server.
+            player.getServer().getCommands().performPrefixedCommand(
+                    player.createCommandSourceStack().withMaximumPermission(PermissionSet.ALL_PERMISSIONS), command);
         } catch (Exception e) {
-            PartyGamesMod.LOGGER.error("Could not execute PartyGames reward command: {}", command, e);
+            PartyGamesMod.LOGGER.error("Could not execute PartyGames reward command for {}: {}", playerName, command, e);
         }
     }
 
-    private ItemStack createStack(String itemId, int count) {
+    private ItemStack createStack(MinecraftServer server, PartyGamesConfig.ItemReward reward) {
+        if (reward.stackData != null && !reward.stackData.isJsonNull()) {
+            try {
+                ItemStack decoded = ItemStack.CODEC.parse(
+                        server.registryAccess().createSerializationContext(JsonOps.INSTANCE), reward.stackData)
+                        .resultOrPartial(error -> PartyGamesMod.LOGGER.warn("Could not decode PartyGames reward stack: {}", error))
+                        .orElse(ItemStack.EMPTY);
+                if (!decoded.isEmpty()) {
+                    decoded.setCount(Math.max(1, Math.min(reward.count, 2304)));
+                    return decoded;
+                }
+            } catch (Exception e) {
+                PartyGamesMod.LOGGER.warn("Could not decode stored PartyGames reward item {}", reward.id, e);
+            }
+        }
+        return createStack(server, reward.id, reward.count);
+    }
+
+    private ItemStack createStack(MinecraftServer server, String itemId, int count) {
         try {
             Identifier id = Identifier.tryParse(itemId);
             if (id == null) return ItemStack.EMPTY;
