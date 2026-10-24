@@ -367,7 +367,20 @@ public final class PartyGamesManager {
     private void returnItemToPlayer(ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
         player.getInventory().add(stack);
-        if (!stack.isEmpty()) player.drop(stack, false, Prediction.SERVER_ONLY);
+        if (stack.isEmpty()) return;
+
+        // Never discard an admin's item if their inventory filled while the editor was open.
+        MinecraftServer server = player.level().getServer();
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        JsonElement stackData = ItemStack.CODEC.encodeStart(
+                        server.registryAccess().createSerializationContext(JsonOps.INSTANCE), stack.copy())
+                .resultOrPartial(error -> PartyGamesMod.LOGGER.warn("Could not encode returned editor item {}: {}", itemId, error))
+                .orElse(null);
+        pendingRewards.computeIfAbsent(player.getUUID(), ignored -> new PendingReward())
+                .items.add(new PendingItem(itemId, stack.getCount(), stackData));
+        savePendingRewards();
+        player.sendSystemMessage(Component.literal("Your inventory was full; remaining editor items are saved. Use /partygames retrieve when you have space.")
+                .withStyle(ChatFormatting.GOLD));
     }
 
     public void onServerStarted(MinecraftServer server) {
