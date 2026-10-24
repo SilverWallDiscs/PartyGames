@@ -1086,8 +1086,8 @@ public final class PartyGamesManager {
     private void recoverPlayerWithoutReturnPoint(MinecraftServer server, ServerPlayer player, String reason) {
         UUID uuid = player.getUUID();
         ServerLevel destination = server.overworld();
-        // Use a fixed safe fallback point; the 26.3 ServerLevel API no longer exposes getSharedSpawnPos().
-        BlockPos spawn = new BlockPos(0, FLOOR_Y, 0);
+        // In 26.3 the world spawn is exposed through the level's respawn data.
+        BlockPos spawn = destination.getLevelData().getRespawnData().pos();
 
         player.stopRiding();
         player.setDeltaMovement(Vec3.ZERO);
