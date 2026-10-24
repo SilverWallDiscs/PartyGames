@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.1.6**
+**Current version: 0.1.7**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
@@ -19,11 +19,12 @@ The first playable minigame is **Dance Floor**:
 - If reward items do not fit in a player's inventory, the leftovers are persisted and can be claimed with **/partygames retrieve**.
 - Return locations and pending rewards are persisted so a server restart does not strand a player in the event dimension or erase unclaimed items.
 - A participant who falls below Y=0 is teleported back onto the arena floor, with velocity and fall distance reset.
-- Disconnect cleanup checks the entity manager for half-removed player entities after disconnects and explicitly tells clients to remove stale entity IDs, preventing abandoned ghost entities from remaining visible.
+- Disconnect handling leaves player entity and chunk-tracking cleanup to vanilla Minecraft. PartyGames never manually removes stale ServerPlayer entities or sends custom remove-entity packets, avoiding duplicate-UUID and DistanceManager corruption.
 - On server shutdown, the active event is stopped without awarding prizes, temporary event entities are cleaned up, and player return locations remain saved so participants can be restored when they reconnect after the restart.
 - Reconnecting players keep their original pre-event snapshot if they rejoin before reconnect recovery runs; players stranded in the event dimension outside an active game are returned to the Overworld spawn with usable survival abilities.
 - Event invulnerability is enforced temporarily by the player-protection mixin rather than setting permanent invulnerability on the player; reconnect recovery runs immediately on join and resynchronizes the client's game mode when returning.
 - A per-tick recovery watchdog retries pending return sessions, moves unregistered players out of the event dimension during any phase, repairs stale Survival `mayBuild=false` state, and logs the exact player mode/abilities during reconnect and restoration for diagnosis.
+- Reconnect restoration is scheduled after the JOIN callback, once vanilla has registered the new player instance. Commands to rejoin during this short recovery window are queued and processed after restoration.
 
 PartyGames is server-side. Players do not need to install the mod on their clients.
 
