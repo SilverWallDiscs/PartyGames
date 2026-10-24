@@ -102,11 +102,11 @@ public final class PartyGamesMod implements ModInitializer {
                     }))
                     .then(Commands.literal("start").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context ->
                             manager.startRegistration(context.getSource().getServer(), false) ? 1 : 0))
-                    .then(Commands.literal("stop").requires(source -> source.hasPermission(2)).executes(context -> {
+                    .then(Commands.literal("stop").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context -> {
                         manager.cancelEvent(context.getSource().getServer());
                         return 1;
                     }))
-                    .then(Commands.literal("reload").requires(source -> source.hasPermission(2)).executes(context -> {
+                    .then(Commands.literal("reload").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context -> {
                         config = PartyGamesConfig.load(configPath());
                         manager.updateConfig(config);
                         context.getSource().sendSuccess(() -> Component.literal("PartyGames configuration reloaded."), true);
