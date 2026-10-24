@@ -36,6 +36,7 @@ import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.Prediction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -173,7 +174,7 @@ public final class PartyGamesManager {
     private void openAdminMenu(ServerPlayer player, PartyGamesAdminMenu.View view, int place, int page) {
         int size = (view == PartyGamesAdminMenu.View.MAIN || view == PartyGamesAdminMenu.View.PLACES) ? 27 : 54;
         PartyGamesAdminMenu.AdminContainer container = new PartyGamesAdminMenu.AdminContainer(size, view);
-        ItemStack filler = menuItem(Items.GRAY_STAINED_GLASS_PANE, " ");
+        ItemStack filler = menuItem(Blocks.STAINED_GLASS_PANE.gray().asItem(), " ");
         for (int slot = 0; slot < size; slot++) container.setItem(slot, filler.copy());
 
         MinecraftServer server = player.level().getServer();
@@ -201,7 +202,7 @@ public final class PartyGamesManager {
                         if (!display.isEmpty()) container.setItem(slot, display);
                     }
                 }
-                container.setItem(45, menuItem(Items.LIME_DYE, "Save added items"));
+                container.setItem(45, menuItem(Blocks.WOOL.lime().asItem(), "Save added items"));
                 container.setItem(46, menuItem(Items.BARRIER, "Remove all configured item rewards"));
                 container.setItem(47, menuItem(Items.COMMAND_BLOCK, "View / add / remove commands"));
                 container.setItem(49, menuItem(Items.ARROW, "Back to prize places"));
@@ -366,7 +367,7 @@ public final class PartyGamesManager {
     private void returnItemToPlayer(ServerPlayer player, ItemStack stack) {
         if (stack.isEmpty()) return;
         player.getInventory().add(stack);
-        if (!stack.isEmpty()) player.drop(stack, false);
+        if (!stack.isEmpty()) player.drop(stack, false, Prediction.SERVER_ONLY);
     }
 
     public void onServerStarted(MinecraftServer server) {
@@ -1051,7 +1052,7 @@ public final class PartyGamesManager {
                 Entity cushion = findCushion(nearestSeat);
                 if (cushion != null && (cushion.getPassengers().isEmpty()
                         || cushion.getPassengers().contains(player))) {
-                    player.startRiding(cushion, true);
+                    player.startRiding(cushion, true, true);
                 }
             }
         }
