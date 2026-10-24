@@ -35,6 +35,7 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
+import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.util.Prediction;
@@ -582,33 +583,42 @@ public final class PartyGamesManager {
             player.sendSystemMessage(Component.literal("You have already joined this event."));
             return 1;
         }
+        // A login can race with /partygames join. Restore the previous session before
+        // taking a new snapshot so an old event-dimension state cannot become the baseline.
+        if (player.level() == eventLevel) {
+            MinecraftServer server = player.level().getServer();
+            if (returnPoints.containsKey(uuid)) {
+                returnPlayer(server, player);
+            } else {
+                recoverPlayerWithoutReturnPoint(server, player, "join requested while still inside the event dimension");
+            }
+        }
+
         if (joinedPlayers.size() >= 200) {
             player.sendSystemMessage(Component.literal("This event has reached its player limit."));
             return 0;
         }
 
-        // The first snapshot is the player's real pre-event state. During a quick
-        // disconnect/reconnect, a join command can run before the JOIN callback restores
-        // that snapshot. Never overwrite it with temporary event abilities/coordinates.
+        // Preserve the original pre-event snapshot if reconnect recovery is still pending.
         returnPoints.putIfAbsent(uuid, snapshot(player));
         entrantNames.put(uuid, player.getGameProfile().name());
         joinedPlayers.add(uuid);
         alivePlayers.add(uuid);
         saveSessions();
 
+        // Damage is prevented by ProtectedPlayerMixin while the UUID is in joinedPlayers.
+        // Do not set permanent invulnerability or permanently mutate player abilities:
+        // Minecraft saves player state on disconnect, which can strand them after rejoining.
         player.setGameMode(GameType.SURVIVAL);
-        player.setPermanentlyInvulnerable(true);
-        player.getAbilities().mayBuild = false;
-        player.getAbilities().instabuild = false;
-        player.getAbilities().mayfly = false;
-        player.getAbilities().flying = false;
-        player.onUpdateAbilities();
+        player.setPermanentlyInvulnerable(false);
 
         BlockPos spawn = spawnPositions.isEmpty()
                 ? new BlockPos(0, FLOOR_Y + 1, 0)
                 : spawnPositions.get(nextSpawnIndex++ % spawnPositions.size()).above();
         player.teleportTo(eventLevel, spawn.getX() + 0.5, FLOOR_Y + 1.0, spawn.getZ() + 0.5,
                 Set.of(), player.getYRot(), player.getXRot(), true);
+        synchronizeClientGameMode(player, GameType.SURVIVAL);
+        player.onUpdateAbilities();
         player.sendSystemMessage(Component.literal("You joined PartyGames: Dance Floor! Your inventory is protected.")
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
         return 1;
@@ -1052,13 +1062,20 @@ public final class PartyGamesManager {
         }
 
         player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch, true);
-        player.setGameMode(GameType.byName(point.gameMode, GameType.SURVIVAL));
+        GameType restoredGameMode = GameType.byName(point.gameMode, GameType.SURVIVAL);
+        player.setGameMode(restoredGameMode);
         player.setPermanentlyInvulnerable(point.invulnerable);
-        player.getAbilities().mayBuild = point.mayBuild;
+
+        // Older builds stored mayBuild=false in some return snapshots. In Survival and
+        // Creative this is invalid and can leave the server refusing block interaction.
+        player.getAbilities().mayBuild = point.mayBuild
+                || restoredGameMode.isSurvival()
+                || restoredGameMode.isCreative();
         player.getAbilities().instabuild = point.instabuild;
         player.getAbilities().mayfly = point.mayfly;
         player.getAbilities().flying = point.flying && point.mayfly;
         player.onUpdateAbilities();
+        synchronizeClientGameMode(player, restoredGameMode);
         player.sendSystemMessage(Component.literal("You have been returned from PartyGames.")
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
 
@@ -1100,6 +1117,7 @@ public final class PartyGamesManager {
         player.getAbilities().mayfly = false;
         player.getAbilities().flying = false;
         player.onUpdateAbilities();
+        synchronizeClientGameMode(player, GameType.SURVIVAL);
 
         joinedPlayers.remove(uuid);
         alivePlayers.remove(uuid);
@@ -1112,6 +1130,13 @@ public final class PartyGamesManager {
                 .withStyle(ChatFormatting.YELLOW));
         PartyGamesMod.LOGGER.warn("Recovered player {} to the Overworld spawn: {}.",
                 player.getGameProfile().name(), reason);
+    }
+
+    private void synchronizeClientGameMode(ServerPlayer player, GameType gameMode) {
+        // CHANGE_GAME_MODE refreshes the client's local interaction rules even if the
+        // server was already in Survival and setGameMode therefore emitted no change.
+        player.connection.send(new ClientboundGameEventPacket(
+                ClientboundGameEventPacket.CHANGE_GAME_MODE, (float) gameMode.getId()));
     }
 
     private ReturnPoint snapshot(ServerPlayer player) {
