@@ -20,6 +20,8 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.ChatFormatting;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -43,6 +45,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 public final class PartyGamesManager {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -51,7 +54,19 @@ public final class PartyGamesManager {
     private static final ResourceKey<Level> EVENT_DIMENSION = ResourceKey.create(
             Registries.DIMENSION, Identifier.fromNamespaceAndPath(PartyGamesMod.MOD_ID, "event"));
     private static final int FLOOR_Y = 64;
+    private static final int WALL_HEIGHT = 9;
+    private static final int ROOF_Y = FLOOR_Y + WALL_HEIGHT + 1;
+    private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
     private static final Random RANDOM = new Random();
+    private static final List<String> MUSIC_DISC_SOUNDS = List.of(
+            "minecraft:music_disc.otherside",
+            "minecraft:music_disc.tears",
+            "minecraft:music_disc.precipice",
+            "minecraft:music_disc.creator",
+            "minecraft:music_disc.pigstep",
+            "minecraft:music_disc.bounce",
+            "minecraft:music_disc.lava_chicken"
+    );
 
     private static final List<BlockState> DANCE_COLORS = List.of(
             Blocks.CONCRETE.white().defaultBlockState(),
@@ -146,7 +161,6 @@ public final class PartyGamesManager {
 
     public void tick(MinecraftServer server) {
         // Keep event participants fed while they are inside the minigame dimension.
-        // Resetting exhaustion as well prevents sprinting/jumping from consuming hunger.
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player != null && player.level() == eventLevel) {
@@ -226,15 +240,7 @@ public final class PartyGamesManager {
         phaseEndsAt = System.currentTimeMillis() + config.joinDurationSeconds * 1000L;
         nextAutomaticEventAt = System.currentTimeMillis() + config.eventIntervalMinutes * 60_000L;
 
-        Component announcement = Component.literal("A PartyGames event has appeared! ")
-                .withStyle(ChatFormatting.LIGHT_PURPLE)
-                .append(Component.literal("[Participate]")
-                        .withStyle(style -> style.withColor(ChatFormatting.GREEN)
-                                .withBold(true)
-                                .withClickEvent(new ClickEvent.RunCommand("/partygames join"))));
-        server.getPlayerList().broadcastSystemMessage(announcement, false);
-        broadcast(server, "Dance Floor opens for " + config.joinDurationSeconds
-                + " seconds. Click [Participate] or run /partygames join!");
+        announceParticipation(server);
         PartyGamesMod.LOGGER.info("PartyGames registration opened (automatic={}).", automatic);
         return true;
     }
@@ -321,36 +327,38 @@ public final class PartyGamesManager {
             return;
         }
         phase = Phase.DANCING;
+        clearCushions();
         seatPositions.clear();
-        paintRandomFloor();
         stopMusic();
 
-        List<String> tracks = config.musicSounds;
-        String selected = tracks.get(ThreadLocalRandom.current().nextInt(tracks.size()));
+        String selected = MUSIC_DISC_SOUNDS.get(ThreadLocalRandom.current().nextInt(MUSIC_DISC_SOUNDS.size()));
         Identifier soundId = Identifier.tryParse(selected);
         SoundEvent sound = soundId == null ? null : BuiltInRegistries.SOUND_EVENT.getValue(soundId);
-        if (sound == null) {
-            soundId = Identifier.fromNamespaceAndPath("minecraft", "music.game");
-            sound = BuiltInRegistries.SOUND_EVENT.getValue(soundId);
-        }
         if (sound != null && soundId != null) {
             activeMusicId = soundId;
-            eventLevel.playSound(null, new BlockPos(0, FLOOR_Y + 1, 0), sound,
-                    SoundSource.MUSIC, 4.0F, 1.0F);
+            for (UUID uuid : new ArrayList<>(joinedPlayers)) {
+                ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+                if (player != null && player.level() == eventLevel) {
+                    player.playNotifySound(sound, SoundSource.RECORDS, 1.0F, 1.0F);
+                }
+            }
+        } else {
+            PartyGamesMod.LOGGER.error("PartyGames could not find selected music disc sound: {}", selected);
         }
 
-        int min = Math.min(config.musicMinSeconds, config.musicMaxSeconds);
-        int max = Math.max(min, config.musicMaxSeconds);
-        int seconds = ThreadLocalRandom.current().nextInt(min, max + 1);
+        // The floor is black during registration and changes only when the music begins.
+        paintRandomFloor();
+        int seconds = ThreadLocalRandom.current().nextInt(10, 31);
         phaseEndsAt = System.currentTimeMillis() + seconds * 1000L;
         nextColorChangeAt = System.currentTimeMillis() + 700L;
-        broadcast(server, "Dance Floor round " + (completedRounds + 1) + "! Keep moving while the music plays (" + seconds + " seconds).");
+        broadcast(server, "Dance Floor round " + (completedRounds + 1) + "! Keep moving while the music plays!");
     }
 
     private void beginSeatRush(MinecraftServer server) {
         stopMusic();
         phase = Phase.SEAT_RUSH;
         paintFloor(Blocks.CONCRETE.black().defaultBlockState());
+        clearCushions();
         List<BlockPos> available = floorPositions();
         Collections.shuffle(available, RANDOM);
 
@@ -362,11 +370,11 @@ public final class PartyGamesManager {
         seatPositions.clear();
         seatPositions.addAll(available.subList(0, desiredSeats));
         for (BlockPos pos : seatPositions) {
-            eventLevel.setBlockAndUpdate(pos, Blocks.WOOL.lime().defaultBlockState());
+            spawnCushion(pos);
         }
 
         phaseEndsAt = System.currentTimeMillis() + config.seatTimeSeconds * 1000L;
-        broadcast(server, "MUSIC STOPPED! Find a lime cushion! " + desiredSeats + " cushion(s) for "
+        broadcast(server, "Music stopped! Find a cushion! " + desiredSeats + " cushion(s) for "
                 + alivePlayers.size() + " player(s) — " + config.seatTimeSeconds + " seconds!");
     }
 
@@ -390,6 +398,8 @@ public final class PartyGamesManager {
                 eliminated.add(uuid);
             }
         }
+
+        clearCushions();
 
         for (UUID uuid : eliminated) {
             alivePlayers.remove(uuid);
@@ -420,6 +430,8 @@ public final class PartyGamesManager {
 
     private void finishEvent(MinecraftServer server, UUID winner, boolean awardPrizes) {
         stopMusic();
+        clearCushions();
+        paintFloor(Blocks.CONCRETE.black().defaultBlockState());
         if (awardPrizes && winner != null) {
             List<UUID> ranking = new ArrayList<>();
             ranking.add(winner);
@@ -628,23 +640,30 @@ public final class PartyGamesManager {
     private void prepareArena() {
         if (eventLevel == null) return;
         int radius = config.arenaRadius;
-        BlockState glass = Blocks.GLASS.defaultBlockState();
+        BlockState barrier = Blocks.BARRIER.defaultBlockState();
         BlockState air = Blocks.AIR.defaultBlockState();
+        BlockState blackFloor = Blocks.CONCRETE.black().defaultBlockState();
 
+        // Dedicated void arena: black concrete floor, tall invisible barrier walls and a roof.
         for (int x = -radius - 1; x <= radius + 1; x++) {
             for (int z = -radius - 1; z <= radius + 1; z++) {
                 boolean wall = Math.abs(x) == radius + 1 || Math.abs(z) == radius + 1;
                 if (wall) {
-                    for (int y = FLOOR_Y; y <= FLOOR_Y + 4; y++) {
-                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), glass);
+                    for (int y = FLOOR_Y; y < ROOF_Y; y++) {
+                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), barrier);
                     }
                 } else {
-                    BlockState floor = DANCE_COLORS.get(RANDOM.nextInt(DANCE_COLORS.size()));
-                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z), floor);
-                    for (int y = FLOOR_Y + 1; y <= FLOOR_Y + 6; y++) {
+                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z), blackFloor);
+                    for (int y = FLOOR_Y + 1; y < ROOF_Y; y++) {
                         eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), air);
                     }
                 }
+            }
+        }
+
+        for (int x = -radius - 1; x <= radius + 1; x++) {
+            for (int z = -radius - 1; z <= radius + 1; z++) {
+                eventLevel.setBlockAndUpdate(new BlockPos(x, ROOF_Y, z), barrier);
             }
         }
         arenaPrepared = true;
@@ -687,8 +706,82 @@ public final class PartyGamesManager {
         activeMusicId = null;
     }
 
+    private void announceParticipation(MinecraftServer server) {
+        Component announcement = Component.literal("PARTY GAMES ")
+                .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true))
+                .append(Component.literal("Dance Floor is open! ")
+                        .withStyle(ChatFormatting.LIGHT_PURPLE))
+                .append(Component.literal("Click Participate")
+                        .withStyle(style -> style.withColor(ChatFormatting.GREEN)
+                                .withBold(true)
+                                .withUnderlined(true)
+                                .withClickEvent(new ClickEvent.RunCommand("/partygames join"))))
+                .append(Component.literal(" or type ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal("/partygames join")
+                        .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true)));
+        server.getPlayerList().broadcastSystemMessage(announcement, false);
+
+        Identifier chimeId = Identifier.fromNamespaceAndPath("minecraft", "block.note_block.chime");
+        SoundEvent chime = BuiltInRegistries.SOUND_EVENT.getValue(chimeId);
+        if (chime != null) {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                player.playNotifySound(chime, SoundSource.MASTER, 0.8F, 1.15F);
+            }
+        }
+    }
+
+    private Component partyGamesMessage(String message) {
+        Component result = Component.literal("PARTY GAMES ")
+                .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true));
+        Matcher matcher = NUMBER_PATTERN.matcher(message);
+        int previous = 0;
+        while (matcher.find()) {
+            if (matcher.start() > previous) {
+                result = result.append(Component.literal(message.substring(previous, matcher.start()))
+                        .withStyle(ChatFormatting.LIGHT_PURPLE));
+            }
+            result = result.append(Component.literal(matcher.group())
+                    .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true)));
+            previous = matcher.end();
+        }
+        if (previous < message.length()) {
+            result = result.append(Component.literal(message.substring(previous))
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+        }
+        return result;
+    }
+
+    private void spawnCushion(BlockPos floorPos) {
+        if (eventLevel == null) return;
+        MinecraftServer server = eventLevel.getServer();
+        String blockPosition = floorPos.getX() + "," + (FLOOR_Y + 1) + "," + floorPos.getZ();
+        String command = "summon minecraft:cushion "
+                + (floorPos.getX() + 0.5) + " " + (FLOOR_Y + 1) + " " + (floorPos.getZ() + 0.5)
+                + " {block_pos:[I;" + blockPosition + "],color:\"lime\"}";
+        server.getCommands().performPrefixedCommand(
+                server.createCommandSourceStack()
+                        .withLevel(eventLevel)
+                        .withPosition(new Vec3(floorPos.getX() + 0.5, FLOOR_Y + 1, floorPos.getZ() + 0.5))
+                        .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
+                command);
+    }
+
+    private void clearCushions() {
+        if (eventLevel == null) return;
+        try {
+            MinecraftServer server = eventLevel.getServer();
+            server.getCommands().performPrefixedCommand(
+                    server.createCommandSourceStack()
+                            .withLevel(eventLevel)
+                            .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
+                    "kill @e[type=minecraft:cushion]");
+        } catch (Exception e) {
+            PartyGamesMod.LOGGER.warn("Could not clear PartyGames cushions.", e);
+        }
+    }
+
     private void broadcast(MinecraftServer server, String message) {
-        server.getPlayerList().broadcastSystemMessage(Component.literal(message).withStyle(ChatFormatting.LIGHT_PURPLE), false);
+        server.getPlayerList().broadcastSystemMessage(partyGamesMessage(message), false);
     }
 
     private void loadPersistentData() {
