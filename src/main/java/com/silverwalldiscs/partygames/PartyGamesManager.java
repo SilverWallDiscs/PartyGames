@@ -458,12 +458,19 @@ public final class PartyGamesManager {
     }
 
     public void tick(MinecraftServer server) {
-        // Keep event participants fed while they are inside the minigame dimension.
+        // A lost connection can occasionally leave a stale player entity in a level even after
+        // PlayerList no longer knows about that player. Sweep it on the server thread.
+        purgeDisconnectedPlayerEntities(server);
+
+        // Keep event participants fed and rescue them if they escape the arena and fall into the void.
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player != null && player.level() == eventLevel) {
                 player.getFoodData().setFoodLevel(20);
                 player.getFoodData().setSaturation(20.0F);
+                if (phase != Phase.IDLE && player.getY() < 0.0D) {
+                    rescuePlayerToArena(player);
+                }
             }
         }
 
@@ -601,6 +608,7 @@ public final class PartyGamesManager {
         UUID uuid = player.getUUID();
         joinedPlayers.remove(uuid);
         boolean wasAlive = alivePlayers.remove(uuid);
+        awaitingPrizeCommandInput.remove(uuid);
         if (wasAlive && phase != Phase.IDLE && phase != Phase.JOINING) {
             eliminationOrder.add(uuid);
         }
@@ -608,6 +616,55 @@ public final class PartyGamesManager {
         if (phase == Phase.JOINING) {
             broadcast(server, player.getGameProfile().name() + " left the event registration.");
         }
+
+        // The disconnect callback may run before vanilla completes world removal.
+        // Recheck on the next server task and forcibly remove only stale, unlisted instances.
+        server.execute(() -> purgeDisconnectedPlayerEntities(server));
+    }
+
+    private void purgeDisconnectedPlayerEntities(MinecraftServer server) {
+        for (ServerLevel level : server.getAllLevels()) {
+            for (ServerPlayer levelPlayer : new ArrayList<>(level.players())) {
+                ServerPlayer listedPlayer = server.getPlayerList().getPlayer(levelPlayer.getUUID());
+                if (listedPlayer == levelPlayer) continue;
+
+                UUID uuid = levelPlayer.getUUID();
+                levelPlayer.stopRiding();
+                level.removePlayerImmediately(levelPlayer, Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+                PartyGamesMod.LOGGER.warn(
+                        "Removed stale player entity {} ({}) from dimension {} because no matching online player exists.",
+                        levelPlayer.getGameProfile().name(), uuid, level.dimension().identifier());
+
+                joinedPlayers.remove(uuid);
+                alivePlayers.remove(uuid);
+                awaitingPrizeCommandInput.remove(uuid);
+            }
+        }
+    }
+
+    private void rescuePlayerToArena(ServerPlayer player) {
+        if (eventLevel == null || player.level() != eventLevel) return;
+
+        List<BlockPos> positions = floorPositions();
+        if (positions.isEmpty()) {
+            positions = List.of(new BlockPos(0, FLOOR_Y, 0));
+        }
+        int index = Math.floorMod(player.getUUID().hashCode(), positions.size());
+        BlockPos safeFloor = positions.get(index);
+
+        player.stopRiding();
+        player.setDeltaMovement(Vec3.ZERO);
+        player.resetFallDistance();
+        player.teleportTo(eventLevel, safeFloor.getX() + 0.5D, FLOOR_Y + 1.0D,
+                safeFloor.getZ() + 0.5D, Set.of(), player.getYRot(), player.getXRot(), true);
+        player.setDeltaMovement(Vec3.ZERO);
+        player.resetFallDistance();
+
+        player.sendSystemMessage(Component.literal(
+                "You fell out of the arena and were returned safely to the Dance Floor.")
+                .withStyle(ChatFormatting.YELLOW));
+        PartyGamesMod.LOGGER.warn("Rescued PartyGames participant {} after falling below Y=0.",
+                player.getGameProfile().name());
     }
 
     public void cancelEvent(MinecraftServer server) {
