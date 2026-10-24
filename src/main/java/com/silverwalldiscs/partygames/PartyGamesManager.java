@@ -789,7 +789,7 @@ public final class PartyGamesManager {
         try {
             // Execute with the winner as the command entity and position. @s, @p and playsound targets
             // then resolve relative to the actual winner, while permission still comes from the server.
-            player.getServer().getCommands().performPrefixedCommand(
+            player.level().getServer().getCommands().performPrefixedCommand(
                     player.createCommandSourceStack().withMaximumPermission(PermissionSet.ALL_PERMISSIONS), command);
         } catch (Exception e) {
             PartyGamesMod.LOGGER.error("Could not execute PartyGames reward command for {}: {}", playerName, command, e);
