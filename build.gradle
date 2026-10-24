@@ -13,10 +13,18 @@ repositories {
     mavenCentral()
 }
 
+loom {
+    mixin {
+        defaultRefmapName = "partygames.refmap.json"
+        useLegacyMixinAp = true
+    }
+}
+
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    annotationProcessor "net.fabricmc:sponge-mixin:0.17.5+mixin.0.8.7"
 }
 
 processResources {
