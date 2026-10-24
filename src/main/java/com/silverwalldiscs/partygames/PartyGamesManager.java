@@ -50,6 +50,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -106,6 +107,7 @@ public final class PartyGamesManager {
     private final Map<UUID, ReturnPoint> returnPoints = new HashMap<>();
     private final Map<UUID, PendingReward> pendingRewards = new HashMap<>();
     private final Map<UUID, String> entrantNames = new HashMap<>();
+    private final Map<UUID, Integer> awaitingPrizeCommandInput = new HashMap<>();
     private final Set<UUID> joinedPlayers = new LinkedHashSet<>();
     private final Set<UUID> alivePlayers = new LinkedHashSet<>();
     private final List<UUID> eliminationOrder = new ArrayList<>();
@@ -141,6 +143,62 @@ public final class PartyGamesManager {
         return joinedPlayers.contains(uuid);
     }
 
+    public boolean isCommandsBlocked(ServerPlayer player) {
+        return player != null && (PartyGamesMod.MOD_ID + ":event").equals(
+                player.level().dimension().identifier().toString());
+    }
+
+    public boolean tryMountCushion(ServerPlayer player, Entity entity) {
+        if (player == null || entity == null || phase != Phase.SEAT_RUSH
+                || player.level() != eventLevel || !alivePlayers.contains(player.getUUID())
+                || !isCushion(entity)) return false;
+
+        if (!entity.getPassengers().isEmpty() && !entity.getPassengers().contains(player)) {
+            player.sendSystemMessage(Component.literal("This cushion is already occupied.")
+                    .withStyle(ChatFormatting.RED));
+            return true;
+        }
+        if (entity.getPassengers().contains(player) || player.startRiding(entity, true, true)) {
+            player.sendSystemMessage(Component.literal("You got the cushion!")
+                    .withStyle(ChatFormatting.GREEN));
+        }
+        return true;
+    }
+
+    public boolean capturePendingPrizeCommand(ServerPlayer player, String rawCommand) {
+        Integer place = awaitingPrizeCommandInput.remove(player.getUUID());
+        if (place == null) return false;
+        String command = rawCommand == null ? "" : rawCommand.trim();
+        while (command.startsWith("/")) command = command.substring(1).trim();
+
+        if (command.equalsIgnoreCase("cancel")) {
+            player.sendSystemMessage(Component.literal("Command entry cancelled.")
+                    .withStyle(ChatFormatting.YELLOW));
+            openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, 0);
+            return true;
+        }
+        if (command.isBlank() || command.length() > 2048) {
+            player.sendSystemMessage(Component.literal(command.isBlank()
+                    ? "No command entered. Type cancel to abort."
+                    : "That command is too long. Please enter at most 2048 characters.")
+                    .withStyle(ChatFormatting.RED));
+            openAdminMenu(player, PartyGamesAdminMenu.View.COMMANDS, place, 0);
+            return true;
+        }
+        addPrizeCommand(player, place, command);
+        return true;
+    }
+
+    private void requestPrizeCommandInput(ServerPlayer player, int place) {
+        if (config.prizeForPlace(place) == null) return;
+        awaitingPrizeCommandInput.put(player.getUUID(), place);
+        player.closeContainer();
+        player.sendSystemMessage(Component.literal("Enter the reward command in chat for " + placeName(place) + ".")
+                .withStyle(ChatFormatting.LIGHT_PURPLE));
+        player.sendSystemMessage(Component.literal("Type the command with or without /; it will be saved, not executed. Type cancel to abort.")
+                .withStyle(ChatFormatting.GRAY));
+    }
+
     public String status() {
         return "PartyGames phase: " + phase.name().toLowerCase()
                 + " | joined: " + joinedPlayers.size()
@@ -174,8 +232,11 @@ public final class PartyGamesManager {
     private void openAdminMenu(ServerPlayer player, PartyGamesAdminMenu.View view, int place, int page) {
         int size = (view == PartyGamesAdminMenu.View.MAIN || view == PartyGamesAdminMenu.View.PLACES) ? 27 : 54;
         PartyGamesAdminMenu.AdminContainer container = new PartyGamesAdminMenu.AdminContainer(size, view);
-        ItemStack filler = menuItem(Blocks.STAINED_GLASS_PANE.gray().asItem(), " ");
-        for (int slot = 0; slot < size; slot++) container.setItem(slot, filler.copy());
+        ItemStack filler = menuItem(Items.BLACK_STAINED_GLASS_PANE, " ");
+        for (int slot = 0; slot < size; slot++) {
+            if (view == PartyGamesAdminMenu.View.ITEMS && slot >= 9 && slot <= 35) continue;
+            container.setItem(slot, filler.copy());
+        }
 
         MinecraftServer server = player.level().getServer();
         String title;
@@ -309,13 +370,7 @@ public final class PartyGamesManager {
                                 Math.min(page, Math.max(0, (prize.commands.size() - 1) / 45)));
                     }
                 } else if (slot == 45) {
-                    Component prompt = Component.literal("Click here to enter a command for " + placeName(place)
-                                    + ". Commands run as the winner, so @s targets them and @p resolves nearest to them: ")
-                            .withStyle(ChatFormatting.LIGHT_PURPLE)
-                            .append(Component.literal("/partygames modify addcommand " + place + " ")
-                                    .withStyle(style -> style.withColor(ChatFormatting.AQUA).withUnderlined(true)
-                                            .withClickEvent(new ClickEvent.SuggestCommand("/partygames modify addcommand " + place + " "))));
-                    player.sendSystemMessage(prompt);
+                    requestPrizeCommandInput(player, place);
                 } else if (slot == 46) {
                     openAdminMenu(player, PartyGamesAdminMenu.View.ITEMS, place, 0);
                 } else if (slot == 47 && page > 0) {
@@ -447,9 +502,8 @@ public final class PartyGamesManager {
             return;
         }
 
-        if (phase == Phase.SEAT_RUSH) {
-            keepPlayersSeated(server);
-            if (now >= phaseEndsAt) resolveSeatRush(server);
+        if (phase == Phase.SEAT_RUSH && now >= phaseEndsAt) {
+            resolveSeatRush(server);
         }
     }
 
@@ -512,6 +566,7 @@ public final class PartyGamesManager {
         alivePlayers.add(uuid);
         saveSessions();
 
+        player.setGameMode(GameType.SURVIVAL);
         player.setPermanentlyInvulnerable(true);
         player.getAbilities().mayBuild = false;
         player.getAbilities().instabuild = false;
@@ -619,7 +674,7 @@ public final class PartyGamesManager {
         }
 
         phaseEndsAt = System.currentTimeMillis() + config.seatTimeSeconds * 1000L;
-        broadcast(server, "Music stopped! Find a cushion! " + desiredSeats + " cushion(s) for "
+        broadcast(server, "Music stopped! Right-click a cushion to sit! " + desiredSeats + " cushion(s) for "
                 + alivePlayers.size() + " player(s) — " + config.seatTimeSeconds + " seconds!");
     }
 
@@ -865,6 +920,7 @@ public final class PartyGamesManager {
         }
 
         player.teleportTo(destination, point.x, point.y, point.z, Set.of(), point.yaw, point.pitch, true);
+        player.setGameMode(GameType.byName(point.gameMode, GameType.SURVIVAL));
         player.setPermanentlyInvulnerable(point.invulnerable);
         player.getAbilities().mayBuild = point.mayBuild;
         player.getAbilities().instabuild = point.instabuild;
@@ -888,6 +944,7 @@ public final class PartyGamesManager {
         point.z = player.getZ();
         point.yaw = player.getYRot();
         point.pitch = player.getXRot();
+        point.gameMode = player.gameMode().getName();
         point.invulnerable = player.isPermanentlyInvulnerable();
         point.mayBuild = player.getAbilities().mayBuild;
         point.instabuild = player.getAbilities().instabuild;
@@ -1166,6 +1223,7 @@ public final class PartyGamesManager {
 
     private static final class ReturnPoint {
         public String dimension = "minecraft:overworld";
+        public String gameMode = "survival";
         public double x;
         public double y;
         public double z;
