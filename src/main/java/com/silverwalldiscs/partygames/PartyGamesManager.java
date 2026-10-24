@@ -33,7 +33,6 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
-import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.network.protocol.game.ClientboundGameEventPacket;
 import net.minecraft.resources.Identifier;
@@ -115,7 +114,9 @@ public final class PartyGamesManager {
     private final List<UUID> eliminationOrder = new ArrayList<>();
     private final List<BlockPos> seatPositions = new ArrayList<>();
     private final List<BlockPos> spawnPositions = new ArrayList<>();
-    private final List<ServerPlayer> pendingDisconnectedPlayers = new ArrayList<>();
+    // Delay reconnect state mutations until vanilla has finished PlayerList/entity registration.
+    private final Set<UUID> recoveryPendingPlayers = new HashSet<>();
+    private final Set<UUID> joinAfterRecovery = new LinkedHashSet<>();
 
     private Phase phase = Phase.IDLE;
     private ServerLevel eventLevel;
@@ -458,7 +459,6 @@ public final class PartyGamesManager {
         // Do not award prizes or teleport players while Minecraft is shutting down.
         // Keep returnPoints persisted so players who were in the arena are restored on next login.
         stopMusic();
-        purgeDisconnectedPlayerEntities(server);
         clearCushions();
         if (eventLevel != null) paintFloor(Blocks.CONCRETE.black().defaultBlockState());
 
@@ -477,9 +477,9 @@ public final class PartyGamesManager {
     }
 
     public void tick(MinecraftServer server) {
-        // A lost connection can occasionally leave a stale player entity in a level even after
-        // PlayerList no longer knows about that player. Sweep it on the server thread.
-        purgeDisconnectedPlayerEntities(server);
+        // Do not manually remove ServerPlayer entities here. Minecraft owns PlayerList,
+        // chunk tracking and entity lifecycle; forcibly removing a stale reference can corrupt
+        // DistanceManager and make the next connection for the same UUID unusable.
 
         // Run in every phase, not only while IDLE. A stale/unregistered player left in the
         // reserved event dimension must never remain there just because the next game is open.
@@ -574,12 +574,19 @@ public final class PartyGamesManager {
     }
 
     public int join(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        if (phase == Phase.JOINING && recoveryPendingPlayers.contains(uuid)) {
+            joinAfterRecovery.add(uuid);
+            player.sendSystemMessage(Component.literal(
+                    "Your previous PartyGames session is being restored. You will be joined automatically.")
+                    .withStyle(ChatFormatting.YELLOW));
+            return 1;
+        }
         if (phase != Phase.JOINING) {
             player.sendSystemMessage(Component.literal("There is no PartyGames event accepting players right now.")
                     .withStyle(ChatFormatting.RED));
             return 0;
         }
-        UUID uuid = player.getUUID();
         if (joinedPlayers.contains(uuid)) {
             player.sendSystemMessage(Component.literal("You have already joined this event."));
             return 1;
@@ -636,23 +643,50 @@ public final class PartyGamesManager {
         return 1;
     }
 
+    public void markPlayerRecoveryPending(ServerPlayer player) {
+        recoveryPendingPlayers.add(player.getUUID());
+    }
+
     public void onPlayerJoin(MinecraftServer server, ServerPlayer player) {
         UUID uuid = player.getUUID();
+        // The scheduled callback only acts on the currently registered instance. If the player
+        // disconnected again before recovery ran, never mutate that stale entity.
+        if (server.getPlayerList().getPlayer(uuid) != player) {
+            recoveryPendingPlayers.remove(uuid);
+            joinAfterRecovery.remove(uuid);
+            PartyGamesMod.LOGGER.warn(
+                    "Skipping PartyGames reconnect recovery for stale player instance {} ({}).",
+                    player.getGameProfile().name(), uuid);
+            return;
+        }
+
         PartyGamesMod.LOGGER.info(
                 "PartyGames connection JOIN for {}: phase={}, dimension={}, gameMode={}, mayBuild={}, mayfly={}, permanentlyInvulnerable={}, joined={}, savedReturnPoint={}.",
                 player.getGameProfile().name(), phase, player.level().dimension().identifier(),
                 player.gameMode().getName(), player.getAbilities().mayBuild, player.getAbilities().mayfly,
                 player.isPermanentlyInvulnerable(), joinedPlayers.contains(uuid), returnPoints.containsKey(uuid));
-        if (!joinedPlayers.contains(uuid)) {
-            if (returnPoints.containsKey(uuid)) {
-                returnPlayer(server, player);
-            } else if (eventLevel != null && player.level() == eventLevel) {
-                // The saved snapshot may be missing/corrupt after an interrupted session.
-                // Do not leave the player stuck in the protected event dimension.
-                recoverPlayerWithoutReturnPoint(server, player, "reconnected without a saved return point");
+        try {
+            if (!joinedPlayers.contains(uuid)) {
+                if (returnPoints.containsKey(uuid)) {
+                    returnPlayer(server, player);
+                } else if (eventLevel != null && player.level() == eventLevel) {
+                    recoverPlayerWithoutReturnPoint(server, player, "reconnected without a saved return point");
+                }
+            }
+            deliverPending(player, false);
+        } finally {
+            recoveryPendingPlayers.remove(uuid);
+            if (joinAfterRecovery.remove(uuid)) {
+                ServerPlayer current = server.getPlayerList().getPlayer(uuid);
+                if (current == player && phase == Phase.JOINING) {
+                    join(player);
+                } else if (current == player) {
+                    player.sendSystemMessage(Component.literal(
+                            "Your previous session was restored, but PartyGames is no longer accepting players.")
+                            .withStyle(ChatFormatting.YELLOW));
+                }
             }
         }
-        deliverPending(player, false);
     }
 
     public void onPlayerDisconnect(MinecraftServer server, ServerPlayer player) {
@@ -660,76 +694,17 @@ public final class PartyGamesManager {
         joinedPlayers.remove(uuid);
         boolean wasAlive = alivePlayers.remove(uuid);
         awaitingPrizeCommandInput.remove(uuid);
+        recoveryPendingPlayers.remove(uuid);
+        joinAfterRecovery.remove(uuid);
         if (wasAlive && phase != Phase.IDLE && phase != Phase.JOINING) {
             eliminationOrder.add(uuid);
         }
-        player.stopRiding();
-        if (!pendingDisconnectedPlayers.contains(player)) pendingDisconnectedPlayers.add(player);
 
+        // Never remove ServerPlayer entities or alter their level/chunk memberships here.
+        // Vanilla owns the disconnect lifecycle and will safely remove the old instance.
         saveSessions();
         if (phase == Phase.JOINING) {
             broadcast(server, player.getGameProfile().name() + " left the event registration.");
-        }
-        // Purging happens during the next server tick, after vanilla has removed the connection.
-    }
-
-    private void purgeDisconnectedPlayerEntities(MinecraftServer server) {
-        // This is normally called only when at least one disconnect is queued, so the full
-        // entity scan happens on disconnect/shutdown rather than on every server tick.
-        if (pendingDisconnectedPlayers.isEmpty()) return;
-
-        Set<ServerPlayer> candidates = new LinkedHashSet<>(pendingDisconnectedPlayers);
-        pendingDisconnectedPlayers.clear();
-
-        // ServerLevel.players() is only the active player list. A half-removed player can be
-        // absent from that list while its entity is still registered in the level's entity manager.
-        for (ServerLevel level : server.getAllLevels()) {
-            for (Entity entity : level.getAllEntities()) {
-                if (entity instanceof ServerPlayer levelPlayer
-                        && server.getPlayerList().getPlayer(levelPlayer.getUUID()) != levelPlayer) {
-                    candidates.add(levelPlayer);
-                }
-            }
-        }
-
-        for (ServerPlayer stalePlayer : candidates) {
-            ServerPlayer listedPlayer = server.getPlayerList().getPlayer(stalePlayer.getUUID());
-            if (listedPlayer == stalePlayer) {
-                // The callback can fire before PlayerList finishes removing the connection.
-                // Defer this specific instance until the next tick instead of dropping the cleanup.
-                pendingDisconnectedPlayers.add(stalePlayer);
-                continue;
-            }
-
-            UUID uuid = stalePlayer.getUUID();
-            if (!(stalePlayer.level() instanceof ServerLevel level)) continue;
-
-            List<ServerPlayer> viewers = new ArrayList<>(level.players());
-            stalePlayer.stopRiding();
-
-            if (!stalePlayer.isRemoved()) {
-                level.removePlayerImmediately(stalePlayer, Entity.RemovalReason.DISCARDED);
-            }
-
-            // Explicitly tell remaining clients to forget the entity. This covers the visual
-            // ghost case where the entity tracker/list became inconsistent during disconnect.
-            ClientboundRemoveEntitiesPacket removePacket = new ClientboundRemoveEntitiesPacket(stalePlayer.getId());
-            for (ServerPlayer viewer : viewers) {
-                if (viewer != stalePlayer
-                        && server.getPlayerList().getPlayer(viewer.getUUID()) == viewer) {
-                    viewer.connection.send(removePacket);
-                }
-            }
-
-            PartyGamesMod.LOGGER.warn(
-                    "Removed stale player entity {} ({}) from dimension {} because it no longer matches an online connection.",
-                    stalePlayer.getGameProfile().name(), uuid, level.dimension().identifier());
-
-            if (listedPlayer == null) {
-                joinedPlayers.remove(uuid);
-                alivePlayers.remove(uuid);
-                awaitingPrizeCommandInput.remove(uuid);
-            }
         }
     }
 
@@ -1128,7 +1103,7 @@ public final class PartyGamesManager {
     private void reconcileUnregisteredPlayers(MinecraftServer server, String reason) {
         for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
             UUID uuid = player.getUUID();
-            if (joinedPlayers.contains(uuid)) continue;
+            if (joinedPlayers.contains(uuid) || recoveryPendingPlayers.contains(uuid)) continue;
 
             // A saved session is authoritative until restored; retry it from the tick loop
             // if the JOIN callback was too early or failed to complete its teleport.
