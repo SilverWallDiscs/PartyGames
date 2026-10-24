@@ -28,7 +28,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.protocol.game.ClientboundStopSoundPacket;
+import net.minecraft.network.protocol.game.ClientboundSoundPacket;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -340,7 +342,7 @@ public final class PartyGamesManager {
             for (UUID uuid : new ArrayList<>(joinedPlayers)) {
                 ServerPlayer player = server.getPlayerList().getPlayer(uuid);
                 if (player != null && player.level() == eventLevel) {
-                    player.playNotifySound(sound, SoundSource.RECORDS, 1.0F, 1.0F);
+                    playSoundToPlayer(player, sound, SoundSource.RECORDS, 1.0F, 1.0F);
                 }
             }
         } else {
@@ -727,13 +729,13 @@ public final class PartyGamesManager {
         SoundEvent chime = BuiltInRegistries.SOUND_EVENT.getValue(chimeId);
         if (chime != null) {
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                player.playNotifySound(chime, SoundSource.MASTER, 0.8F, 1.15F);
+                playSoundToPlayer(player, chime, SoundSource.MASTER, 0.8F, 1.15F);
             }
         }
     }
 
     private Component partyGamesMessage(String message) {
-        Component result = Component.literal("PARTY GAMES ")
+        MutableComponent result = Component.literal("PARTY GAMES ")
                 .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true));
         Matcher matcher = NUMBER_PATTERN.matcher(message);
         int previous = 0;
@@ -751,6 +753,15 @@ public final class PartyGamesManager {
                     .withStyle(ChatFormatting.LIGHT_PURPLE));
         }
         return result;
+    }
+
+    private void playSoundToPlayer(ServerPlayer player, SoundEvent sound, SoundSource source,
+                                   float volume, float pitch) {
+        player.connection.send(new ClientboundSoundPacket(
+                BuiltInRegistries.SOUND_EVENT.wrapAsHolder(sound),
+                source,
+                player.getX(), player.getY(), player.getZ(),
+                volume, pitch, RANDOM.nextLong()));
     }
 
     private void spawnCushion(BlockPos floorPos) {
