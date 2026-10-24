@@ -331,7 +331,8 @@ public final class PartyGamesManager {
         seatPositions.clear();
         stopMusic();
 
-        String selected = MUSIC_DISC_SOUNDS.get(ThreadLocalRandom.current().nextInt(MUSIC_DISC_SOUNDS.size()));
+        List<String> tracks = config.musicSounds;
+        String selected = tracks.get(ThreadLocalRandom.current().nextInt(tracks.size()));
         Identifier soundId = Identifier.tryParse(selected);
         SoundEvent sound = soundId == null ? null : BuiltInRegistries.SOUND_EVENT.getValue(soundId);
         if (sound != null && soundId != null) {
@@ -639,6 +640,7 @@ public final class PartyGamesManager {
 
     private void prepareArena() {
         if (eventLevel == null) return;
+        clearCushions();
         int radius = config.arenaRadius;
         BlockState barrier = Blocks.BARRIER.defaultBlockState();
         BlockState air = Blocks.AIR.defaultBlockState();
@@ -698,7 +700,7 @@ public final class PartyGamesManager {
 
     private void stopMusic() {
         if (activeMusicId == null) return;
-        ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(activeMusicId, SoundSource.MUSIC);
+        ClientboundStopSoundPacket packet = new ClientboundStopSoundPacket(activeMusicId, SoundSource.RECORDS);
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = eventLevel == null ? null : eventLevel.getServer().getPlayerList().getPlayer(uuid);
             if (player != null) player.connection.send(packet);
