@@ -111,9 +111,25 @@ public final class PartyGamesConfig {
         if (first == null) first = Prize.defaultFirst();
         if (second == null) second = Prize.defaultSecond();
         if (third == null) third = Prize.defaultThird();
+
+        // Remove gray glass panes accidentally saved by older versions' non-empty editor slots.
+        if (configVersion < 3) {
+            removeLegacyEditorPanes(first);
+            removeLegacyEditorPanes(second);
+            removeLegacyEditorPanes(third);
+            configVersion = 3;
+        }
+
         first.normalize();
         second.normalize();
         third.normalize();
+    }
+
+    private static void removeLegacyEditorPanes(Prize prize) {
+        if (prize != null && prize.items != null) {
+            prize.items.removeIf(item -> item != null
+                    && "minecraft:gray_stained_glass_pane".equals(item.id));
+        }
     }
 
     public Prize prizeForPlace(int place) {
