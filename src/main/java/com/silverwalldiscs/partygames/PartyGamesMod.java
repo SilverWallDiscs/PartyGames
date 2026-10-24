@@ -1,8 +1,6 @@
 package com.silverwalldiscs.partygames;
 
 import com.mojang.brigadier.CommandDispatcher;
-import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -14,6 +12,7 @@ import net.fabricmc.fabric.api.event.player.UseItemCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.fabricmc.fabric.api.resource.ResourcePackActivationType;
 import net.fabricmc.loader.api.FabricLoader;
@@ -74,6 +73,8 @@ public final class PartyGamesMod implements ModInitializer {
 
         registerCommands();
         registerProtection();
+        ServerMessageEvents.ALLOW_CHAT_MESSAGE.register((message, sender, params) ->
+                !manager.capturePendingPrizeCommand(sender, message.getContent()));
         ServerTickEvents.END_SERVER_TICK.register(manager::tick);
         ServerLifecycleEvents.SERVER_STARTED.register(manager::onServerStarted);
         ServerLifecycleEvents.SERVER_STOPPING.register(manager::onServerStopping);
@@ -119,17 +120,7 @@ public final class PartyGamesMod implements ModInitializer {
                             .executes(context -> {
                                 manager.openModifyMenu(context.getSource().getPlayerOrException());
                                 return 1;
-                            })
-                            .then(Commands.literal("addcommand")
-                                    .then(Commands.argument("place", IntegerArgumentType.integer(1, 3))
-                                            .then(Commands.argument("command", StringArgumentType.greedyString())
-                                                    .executes(context -> {
-                                                        manager.addPrizeCommand(
-                                                                context.getSource().getPlayerOrException(),
-                                                                IntegerArgumentType.getInteger(context, "place"),
-                                                                StringArgumentType.getString(context, "command"));
-                                                        return 1;
-                                                    })))))
+                            }))
             );
         });
     }
@@ -147,8 +138,13 @@ public final class PartyGamesMod implements ModInitializer {
                 protectedInteraction(player) ? InteractionResult.FAIL : InteractionResult.PASS);
         AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) ->
                 protectedInteraction(player) ? InteractionResult.FAIL : InteractionResult.PASS);
-        UseEntityCallback.EVENT.register((player, level, hand, entity, hit) ->
-                protectedInteraction(player) ? InteractionResult.FAIL : InteractionResult.PASS);
+        UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            if (!protectedInteraction(player)) return InteractionResult.PASS;
+            if (player instanceof ServerPlayer serverPlayer && manager.tryMountCushion(serverPlayer, entity)) {
+                return InteractionResult.SUCCESS;
+            }
+            return InteractionResult.FAIL;
+        });
         PlayerBlockBreakEvents.BEFORE.register((Level level, Player player, BlockPos pos, BlockState state, net.minecraft.world.level.block.entity.BlockEntity blockEntity) ->
                 !protectedInteraction(player));
     }
