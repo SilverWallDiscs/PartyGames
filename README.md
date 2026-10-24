@@ -1,12 +1,12 @@
 # PartyGames
 
-**Current version: 0.1.7**
+**Current version: 0.1.8**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
 ## Current status
 
-The first playable minigame is **Dance Floor**:
+The available minigames are **Dance Floor** (also selectable as *Music Chairs*) and **Boat Race**:
 - Automatic events on a configurable interval, plus an admin start command.
 - A purple announcement with a green clickable **[Participate]** button.
 - A dedicated flat **partygames:event** dimension supplied by an always-enabled built-in data pack.
@@ -50,7 +50,10 @@ The arena is generated/cleared at the origin of **partygames:event**; that dimen
 - **/partygames join** — join during the registration window.
 - **/partygames status** — view event state and player counts.
 - **/partygames retrieve** — retrieve pending prize items or queued offline command rewards.
-- **/partygames start** — open registration immediately (operator permission required).
+- **/partygames start** — open Dance Floor registration immediately (operator permission required).
+- **/partygames start Music Chairs** — alias for Dance Floor / musical chairs (operator permission required).
+- **/partygames start Boat Race** — open registration for the ice boat-racing minigame.
+- Boat Race generates a 16-lane ice track around X=5120–5500 in the event dimension (over 300 chunks from the dance arena), with honey slow zones and slime jump pads. Each racer receives a boat; the private 3–2–1–GO countdown begins movement after the start signal.
 - **/partygames stop** — cancel the current event and return participants (operator permission required).
 - **/partygames reload** — reload the JSON configuration (operator permission required).
 - **/partygames modify** — open the prize editor (operator permission required).

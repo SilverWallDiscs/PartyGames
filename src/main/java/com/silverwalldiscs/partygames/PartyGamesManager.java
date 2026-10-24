@@ -66,6 +66,15 @@ public final class PartyGamesManager {
     private static final int FLOOR_Y = 64;
     private static final int WALL_HEIGHT = 9;
     private static final int ROOF_Y = FLOOR_Y + WALL_HEIGHT + 1;
+    // The boat circuit starts at X=5120 (320 chunks from the dance arena at the origin).
+    private static final int RACE_START_X = 5120;
+    private static final int RACE_FINISH_X = 5500;
+    private static final int RACE_MAX_PLAYERS = 16;
+    private static final int RACE_FIRST_LANE_Z = -30;
+    private static final int RACE_LANE_SPACING = 4;
+    private static final long RACE_TIMEOUT_MILLIS = 180_000L;
+    private static final int[] RACE_JUMP_OFFSETS = {130, 278};
+    private static final int[][] RACE_HONEY_ZONES = {{82, 91}, {194, 203}};
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
     private static final Random RANDOM = new Random();
     private static final List<String> MUSIC_DISC_SOUNDS = List.of(
@@ -98,7 +107,11 @@ public final class PartyGamesManager {
     );
 
     private enum Phase {
-        IDLE, JOINING, DANCING, SEAT_RUSH
+        IDLE, JOINING, DANCING, SEAT_RUSH, RACE_COUNTDOWN, RACE_RUNNING
+    }
+
+    private enum Minigame {
+        DANCE_FLOOR, BOAT_RACE
     }
 
     private PartyGamesConfig config;
@@ -117,8 +130,15 @@ public final class PartyGamesManager {
     // Delay reconnect state mutations until vanilla has finished PlayerList/entity registration.
     private final Set<UUID> recoveryPendingPlayers = new HashSet<>();
     private final Set<UUID> joinAfterRecovery = new LinkedHashSet<>();
+    private final Map<UUID, Entity> raceBoats = new HashMap<>();
+    private final Map<UUID, Vec3> raceBoatSpawnPositions = new HashMap<>();
+    private final Map<UUID, Double> raceLastX = new HashMap<>();
+    private final Map<UUID, Integer> raceJumpStage = new HashMap<>();
+    private final Map<UUID, Integer> raceLaneByPlayer = new HashMap<>();
+    private final List<UUID> raceFinishOrder = new ArrayList<>();
 
     private Phase phase = Phase.IDLE;
+    private Minigame activeMinigame = Minigame.DANCE_FLOOR;
     private ServerLevel eventLevel;
     private long nextAutomaticEventAt;
     private long phaseEndsAt;
@@ -128,6 +148,7 @@ public final class PartyGamesManager {
     private Identifier activeMusicId;
     private boolean arenaPrepared;
     private boolean loggedMissingDimension;
+    private int countdownValue;
 
     public PartyGamesManager(PartyGamesConfig config, Path dataDirectory) {
         this.config = config;
@@ -204,10 +225,39 @@ public final class PartyGamesManager {
     }
 
     public String status() {
-        return "PartyGames phase: " + phase.name().toLowerCase()
+        return "PartyGames game: " + minigameName(activeMinigame)
+                + " | phase: " + phase.name().toLowerCase()
                 + " | joined: " + joinedPlayers.size()
                 + " | alive: " + alivePlayers.size()
-                + " | completed dance rounds: " + completedRounds;
+                + " | completed dance rounds: " + completedRounds
+                + (activeMinigame == Minigame.BOAT_RACE ? " | boats finished: " + raceFinishOrder.size() : "");
+    }
+
+    public boolean isSupportedGameSelection(String selection) {
+        return parseMinigame(selection) != null;
+    }
+
+    public boolean startSelectedGame(MinecraftServer server, String selection, boolean automatic) {
+        Minigame selected = parseMinigame(selection);
+        if (selected == null) return false;
+        return startRegistrationForGame(server, automatic, selected);
+    }
+
+    private Minigame parseMinigame(String selection) {
+        if (selection == null) return null;
+        String value = selection.trim().toLowerCase(java.util.Locale.ROOT)
+                .replace('_', ' ').replace('-', ' ').replaceAll("\\s+", " ");
+        return switch (value) {
+            case "dance floor", "music chair", "music chairs", "musical chairs", "musical chair",
+                    "dance", "chairs", "chair" -> Minigame.DANCE_FLOOR;
+            case "boat race", "boat racing", "boat", "race", "racing", "carrera de botes",
+                    "carrera de barcos", "carrera", "botes", "barcos" -> Minigame.BOAT_RACE;
+            default -> null;
+        };
+    }
+
+    private String minigameName(Minigame game) {
+        return game == Minigame.BOAT_RACE ? "Boat Race" : "Dance Floor";
     }
 
     public void openModifyMenu(ServerPlayer player) {
@@ -460,9 +510,11 @@ public final class PartyGamesManager {
         // Keep returnPoints persisted so players who were in the arena are restored on next login.
         stopMusic();
         clearCushions();
+        clearRaceBoats();
         if (eventLevel != null) paintFloor(Blocks.CONCRETE.black().defaultBlockState());
 
         phase = Phase.IDLE;
+        activeMinigame = Minigame.DANCE_FLOOR;
         joinedPlayers.clear();
         alivePlayers.clear();
         seatPositions.clear();
@@ -492,7 +544,8 @@ public final class PartyGamesManager {
                 player.getFoodData().setFoodLevel(20);
                 player.getFoodData().setSaturation(20.0F);
                 if (phase != Phase.IDLE && player.getY() < 0.0D) {
-                    rescuePlayerToArena(player);
+                    if (activeMinigame == Minigame.BOAT_RACE) rescueRacer(player);
+                    else rescuePlayerToArena(player);
                 }
             }
         }
@@ -515,10 +568,32 @@ public final class PartyGamesManager {
             if (joinedPlayers.size() < config.minimumPlayers) {
                 broadcast(server, "PartyGames was cancelled because not enough players joined.");
                 finishEvent(server, null, false);
+            } else if (activeMinigame == Minigame.BOAT_RACE) {
+                broadcast(server, "Registration is closed! Boat Race starts now.");
+                startBoatRace(server);
             } else {
                 broadcast(server, "Registration is closed! Dance Floor starts now.");
                 startDanceRound(server);
             }
+            return;
+        }
+
+        if (phase == Phase.RACE_COUNTDOWN) {
+            lockRaceBoats();
+            if (now >= nextColorChangeAt) {
+                if (countdownValue > 0) {
+                    sendRaceCountdown(server, Integer.toString(countdownValue), countdownValue);
+                    countdownValue--;
+                    nextColorChangeAt = now + 1_000L;
+                } else {
+                    startRaceRunning(server, now);
+                }
+            }
+            return;
+        }
+
+        if (phase == Phase.RACE_RUNNING) {
+            tickBoatRace(server, now);
             return;
         }
 
@@ -538,6 +613,10 @@ public final class PartyGamesManager {
     }
 
     public boolean startRegistration(MinecraftServer server, boolean automatic) {
+        return startRegistrationForGame(server, automatic, Minigame.DANCE_FLOOR);
+    }
+
+    private boolean startRegistrationForGame(MinecraftServer server, boolean automatic, Minigame selected) {
         if (phase != Phase.IDLE) {
             broadcast(server, "A PartyGames event is already in progress.");
             return false;
@@ -547,10 +626,11 @@ public final class PartyGamesManager {
             broadcast(server, "PartyGames could not start: the event dimension is unavailable. Check the server log and restart after installing PartyGames.");
             return false;
         }
-        if (!arenaPrepared) prepareArena();
-
-        if (!arenaPrepared) {
+        activeMinigame = selected;
+        if (selected == Minigame.DANCE_FLOOR && !arenaPrepared) prepareArena();
+        if (selected == Minigame.DANCE_FLOOR && !arenaPrepared) {
             broadcast(server, "PartyGames could not prepare the dance floor.");
+            activeMinigame = Minigame.DANCE_FLOOR;
             return false;
         }
 
@@ -560,16 +640,21 @@ public final class PartyGamesManager {
         eliminationOrder.clear();
         entrantNames.clear();
         seatPositions.clear();
+        raceFinishOrder.clear();
+        clearRaceBoats();
         completedRounds = 0;
         nextSpawnIndex = 0;
         spawnPositions.clear();
-        spawnPositions.addAll(floorPositions());
-        Collections.shuffle(spawnPositions, RANDOM);
+        if (selected == Minigame.DANCE_FLOOR) {
+            spawnPositions.addAll(floorPositions());
+            Collections.shuffle(spawnPositions, RANDOM);
+        }
         phaseEndsAt = System.currentTimeMillis() + config.joinDurationSeconds * 1000L;
         nextAutomaticEventAt = System.currentTimeMillis() + config.eventIntervalMinutes * 60_000L;
 
         announceParticipation(server);
-        PartyGamesMod.LOGGER.info("PartyGames registration opened (automatic={}).", automatic);
+        PartyGamesMod.LOGGER.info("PartyGames registration opened for {} (automatic={}).",
+                minigameName(selected), automatic);
         return true;
     }
 
@@ -600,8 +685,10 @@ public final class PartyGamesManager {
             recoverPlayerWithoutReturnPoint(server, player, "join requested while still inside the event dimension");
         }
 
-        if (joinedPlayers.size() >= 200) {
-            player.sendSystemMessage(Component.literal("This event has reached its player limit."));
+        int playerLimit = activeMinigame == Minigame.BOAT_RACE ? RACE_MAX_PLAYERS : 200;
+        if (joinedPlayers.size() >= playerLimit) {
+            player.sendSystemMessage(Component.literal(activeMinigame == Minigame.BOAT_RACE
+                    ? "Boat Race is full (maximum 16 racers)." : "This event has reached its player limit."));
             return 0;
         }
 
@@ -633,7 +720,8 @@ public final class PartyGamesManager {
                 Set.of(), player.getYRot(), player.getXRot(), true);
         synchronizeClientGameMode(player, GameType.SURVIVAL);
         player.onUpdateAbilities();
-        player.sendSystemMessage(Component.literal("You joined PartyGames: Dance Floor! Your inventory is protected.")
+        player.sendSystemMessage(Component.literal("You joined PartyGames: " + minigameName(activeMinigame)
+                + "! Your inventory is protected.")
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
         return 1;
     }
@@ -696,6 +784,12 @@ public final class PartyGamesManager {
         awaitingPrizeCommandInput.remove(uuid);
         recoveryPendingPlayers.remove(uuid);
         joinAfterRecovery.remove(uuid);
+        Entity raceBoat = raceBoats.remove(uuid);
+        if (raceBoat != null) raceBoat.discard();
+        raceBoatSpawnPositions.remove(uuid);
+        raceLastX.remove(uuid);
+        raceJumpStage.remove(uuid);
+        raceLaneByPlayer.remove(uuid);
         if (wasAlive && phase != Phase.IDLE && phase != Phase.JOINING) {
             eliminationOrder.add(uuid);
         }
@@ -706,6 +800,25 @@ public final class PartyGamesManager {
         if (phase == Phase.JOINING) {
             broadcast(server, player.getGameProfile().name() + " left the event registration.");
         }
+    }
+
+    private void rescueRacer(ServerPlayer player) {
+        UUID uuid = player.getUUID();
+        Entity boat = raceBoats.get(uuid);
+        Vec3 start = raceBoatSpawnPositions.get(uuid);
+        if (eventLevel == null || boat == null || start == null || boat.isRemoved()) {
+            returnPlayer(player.level().getServer(), player);
+            return;
+        }
+        boat.setDeltaMovement(Vec3.ZERO);
+        boat.setPos(start.x, start.y, start.z);
+        player.stopRiding();
+        player.teleportTo(eventLevel, start.x, start.y, start.z, Set.of(), -90.0F, 0.0F, true);
+        player.startRiding(boat, true, true);
+        raceLastX.put(uuid, start.x);
+        raceJumpStage.put(uuid, 0);
+        player.sendSystemMessage(Component.literal("You fell off the course and were returned to your starting line.")
+                .withStyle(ChatFormatting.YELLOW));
     }
 
     private void rescuePlayerToArena(ServerPlayer player) {
@@ -731,6 +844,309 @@ public final class PartyGamesManager {
                 .withStyle(ChatFormatting.YELLOW));
         PartyGamesMod.LOGGER.warn("Rescued PartyGames participant {} after falling below Y=0.",
                 player.getGameProfile().name());
+    }
+
+    private void startBoatRace(MinecraftServer server) {
+        clearRaceBoats();
+        prepareRaceTrack();
+        raceFinishOrder.clear();
+        raceBoatSpawnPositions.clear();
+        raceLastX.clear();
+        raceJumpStage.clear();
+        raceLaneByPlayer.clear();
+
+        List<UUID> entrants = new ArrayList<>(joinedPlayers);
+        int lane = 0;
+        for (UUID uuid : entrants) {
+            if (lane >= RACE_MAX_PLAYERS) break;
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null) continue;
+            int laneZ = raceLaneZ(lane);
+            double spawnX = RACE_START_X - 4.0D;
+            double spawnY = FLOOR_Y + 1.0D;
+            double spawnZ = laneZ + 0.5D;
+            Entity boat = summonRaceBoat(server, spawnX, spawnY, spawnZ);
+            if (boat == null) {
+                PartyGamesMod.LOGGER.error("Could not spawn an oak boat for {} in lane {}.", player.getGameProfile().name(), lane + 1);
+                player.sendSystemMessage(Component.literal("Could not create your race boat. Please contact an administrator.")
+                        .withStyle(ChatFormatting.RED));
+                continue;
+            }
+            player.stopRiding();
+            player.teleportTo(eventLevel, spawnX, spawnY, spawnZ, Set.of(), -90.0F, 0.0F, true);
+            player.startRiding(boat, true, true);
+            boat.setDeltaMovement(Vec3.ZERO);
+            raceBoats.put(uuid, boat);
+            Vec3 start = new Vec3(spawnX, spawnY, spawnZ);
+            raceBoatSpawnPositions.put(uuid, start);
+            raceLastX.put(uuid, spawnX);
+            raceJumpStage.put(uuid, 0);
+            raceLaneByPlayer.put(uuid, lane);
+            player.sendSystemMessage(Component.literal("Boat Race: stay in your boat. The countdown is only visible to racers!")
+                    .withStyle(ChatFormatting.LIGHT_PURPLE));
+            lane++;
+        }
+
+        if (raceBoats.size() < config.minimumPlayers) {
+            broadcast(server, "Boat Race could not start because too few boats were available.");
+            finishEvent(server, null, false);
+            return;
+        }
+
+        phase = Phase.RACE_COUNTDOWN;
+        countdownValue = 3;
+        nextColorChangeAt = System.currentTimeMillis();
+        for (UUID uuid : raceBoats.keySet()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player != null) {
+                player.sendSystemMessage(Component.literal("Get ready! First boat to the finish wins.")
+                        .withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+            }
+        }
+        broadcast(server, "Boat Race started with " + raceBoats.size() + " racer(s)!");
+    }
+
+    private Entity summonRaceBoat(MinecraftServer server, double x, double y, double z) {
+        String command = "summon minecraft:oak_boat " + x + " " + y + " " + z;
+        server.getCommands().performPrefixedCommand(
+                server.createCommandSourceStack()
+                        .withLevel(eventLevel)
+                        .withPosition(new Vec3(x, y, z))
+                        .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
+                command);
+        AABB nearby = new AABB(x - 1.5D, y - 1.5D, z - 1.5D, x + 1.5D, y + 2.0D, z + 1.5D);
+        return eventLevel.getEntitiesOfClass(Entity.class, nearby, this::isOakBoat).stream()
+                .filter(entity -> !raceBoats.containsValue(entity))
+                .findFirst().orElse(null);
+    }
+
+    private void prepareRaceTrack() {
+        if (eventLevel == null) return;
+        int minZ = RACE_FIRST_LANE_Z - 2;
+        int maxZ = RACE_FIRST_LANE_Z + (RACE_MAX_PLAYERS - 1) * RACE_LANE_SPACING + 2;
+        BlockState stone = Blocks.STONE_BRICKS.defaultBlockState();
+        BlockState ice = Blocks.BLUE_ICE.defaultBlockState();
+        BlockState dark = Blocks.CONCRETE.black().defaultBlockState();
+        BlockState rail = Blocks.CONCRETE.cyan().defaultBlockState();
+        BlockState air = Blocks.AIR.defaultBlockState();
+
+        // Build a reusable 16-lane track in the reserved event dimension, far from the dance arena.
+        for (int x = RACE_START_X - 8; x <= RACE_FINISH_X + 12; x++) {
+            int offset = x - RACE_START_X;
+            for (int z = minZ; z <= maxZ; z++) {
+                eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y - 1, z), stone);
+                BlockState surface = dark;
+                for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
+                    int center = raceLaneZ(lane);
+                    if (z >= center - 1 && z <= center + 1) {
+                        surface = raceSurface(offset, x, z, ice);
+                        break;
+                    }
+                }
+                eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z), surface);
+                boolean separator = z == minZ || z == maxZ;
+                for (int lane = 0; lane < RACE_MAX_PLAYERS - 1; lane++) {
+                    if (z == raceLaneZ(lane) + 2) separator = true;
+                }
+                for (int y = FLOOR_Y + 1; y <= FLOOR_Y + 3; y++) {
+                    if (separator && x >= RACE_START_X - 8 && x <= RACE_FINISH_X + 8) {
+                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), rail);
+                    } else {
+                        eventLevel.setBlockAndUpdate(new BlockPos(x, y, z), air);
+                    }
+                }
+            }
+        }
+
+        for (int x = RACE_START_X; x <= RACE_START_X + 2; x++) {
+            for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
+                int center = raceLaneZ(lane);
+                for (int z = center - 1; z <= center + 1; z++) {
+                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z),
+                            ((x + z) & 1) == 0 ? Blocks.CONCRETE.lime().defaultBlockState()
+                                    : Blocks.CONCRETE.white().defaultBlockState());
+                }
+            }
+        }
+        for (int x = RACE_FINISH_X - 2; x <= RACE_FINISH_X + 2; x++) {
+            for (int lane = 0; lane < RACE_MAX_PLAYERS; lane++) {
+                int center = raceLaneZ(lane);
+                for (int z = center - 1; z <= center + 1; z++) {
+                    eventLevel.setBlockAndUpdate(new BlockPos(x, FLOOR_Y, z),
+                            ((x + z) & 1) == 0 ? Blocks.CONCRETE.yellow().defaultBlockState()
+                                    : Blocks.CONCRETE.black().defaultBlockState());
+                }
+            }
+        }
+        for (int z = minZ; z <= maxZ; z++) {
+            eventLevel.setBlockAndUpdate(new BlockPos(RACE_START_X + 2, FLOOR_Y + 4, z), rail);
+            eventLevel.setBlockAndUpdate(new BlockPos(RACE_FINISH_X - 1, FLOOR_Y + 4, z), rail);
+        }
+    }
+
+    private BlockState raceSurface(int offset, int x, int z, BlockState ice) {
+        if (offset >= RACE_JUMP_OFFSETS[0] && offset <= RACE_JUMP_OFFSETS[0] + 4
+                || offset >= RACE_JUMP_OFFSETS[1] && offset <= RACE_JUMP_OFFSETS[1] + 4) {
+            return Blocks.SLIME_BLOCK.defaultBlockState();
+        }
+        for (int[] zone : RACE_HONEY_ZONES) {
+            if (offset >= zone[0] && offset <= zone[1]) return Blocks.HONEY_BLOCK.defaultBlockState();
+        }
+        return ice;
+    }
+
+    private int raceLaneZ(int lane) {
+        return RACE_FIRST_LANE_Z + lane * RACE_LANE_SPACING;
+    }
+
+    private boolean isOakBoat(Entity entity) {
+        if (entity == null) return false;
+        Identifier id = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+        return id != null && "minecraft:oak_boat".equals(id.toString());
+    }
+
+    private void lockRaceBoats() {
+        for (Map.Entry<UUID, Entity> entry : raceBoats.entrySet()) {
+            Entity boat = entry.getValue();
+            Vec3 start = raceBoatSpawnPositions.get(entry.getKey());
+            if (boat == null || start == null || boat.isRemoved()) continue;
+            boat.setDeltaMovement(Vec3.ZERO);
+            boat.setPos(start.x, start.y, start.z);
+            ServerPlayer player = eventLevel.getServer().getPlayerList().getPlayer(entry.getKey());
+            if (player != null && player.getVehicle() != boat) player.startRiding(boat, true, true);
+        }
+    }
+
+    private void sendRaceCountdown(MinecraftServer server, String value, int pitchStep) {
+        for (UUID uuid : new ArrayList<>(raceBoats.keySet())) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player == null) continue;
+            player.sendSystemMessage(Component.literal(value)
+                    .withStyle(style -> style.withColor(ChatFormatting.GOLD).withBold(true)));
+            playRaceSound(player, "minecraft:block.note_block.pling", 0.8F, 0.65F + (pitchStep * 0.2F));
+        }
+    }
+
+    private void startRaceRunning(MinecraftServer server, long now) {
+        phase = Phase.RACE_RUNNING;
+        phaseEndsAt = now + RACE_TIMEOUT_MILLIS;
+        for (UUID uuid : raceBoats.keySet()) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            Entity boat = raceBoats.get(uuid);
+            if (player != null) {
+                player.sendSystemMessage(Component.literal("GO! GO! GO!")
+                        .withStyle(style -> style.withColor(ChatFormatting.GREEN).withBold(true)));
+                playRaceSound(player, "minecraft:entity.player.levelup", 0.9F, 1.2F);
+            }
+            if (boat != null) boat.setDeltaMovement(Vec3.ZERO);
+        }
+        broadcast(server, "The Boat Race is underway!");
+    }
+
+    private void tickBoatRace(MinecraftServer server, long now) {
+        if (now >= phaseEndsAt) {
+            completeBoatRace(server, true);
+            return;
+        }
+        for (UUID uuid : new ArrayList<>(raceBoats.keySet())) {
+            Entity boat = raceBoats.get(uuid);
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (boat == null || boat.isRemoved() || player == null) continue;
+
+            if (raceFinishOrder.contains(uuid)) {
+                boat.setDeltaMovement(Vec3.ZERO);
+                continue;
+            }
+            if (player.getVehicle() != boat) player.startRiding(boat, true, true);
+
+            double currentX = boat.getX();
+            double previousX = raceLastX.getOrDefault(uuid, RACE_START_X - 4.0D);
+            int jumpStage = raceJumpStage.getOrDefault(uuid, 0);
+            if (jumpStage < RACE_JUMP_OFFSETS.length) {
+                double jumpX = RACE_START_X + RACE_JUMP_OFFSETS[jumpStage];
+                if (previousX < jumpX && currentX >= jumpX) {
+                    Vec3 velocity = boat.getDeltaMovement();
+                    boat.setDeltaMovement(velocity.x, Math.max(0.58D, velocity.y), velocity.z);
+                    raceJumpStage.put(uuid, jumpStage + 1);
+                    player.sendSystemMessage(Component.literal("SLIME JUMP!")
+                            .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+                    playRaceSound(player, "minecraft:entity.slime.jump", 0.8F, 1.0F);
+                }
+            }
+
+            int offset = (int) Math.floor(currentX - RACE_START_X);
+            for (int[] zone : RACE_HONEY_ZONES) {
+                if (offset >= zone[0] && offset <= zone[1]) {
+                    Vec3 velocity = boat.getDeltaMovement();
+                    boat.setDeltaMovement(velocity.x * 0.82D, velocity.y, velocity.z * 0.7D);
+                    break;
+                }
+            }
+            raceLastX.put(uuid, currentX);
+            if (currentX >= RACE_FINISH_X) {
+                raceFinishOrder.add(uuid);
+                boat.setDeltaMovement(Vec3.ZERO);
+                player.sendSystemMessage(Component.literal("You finished in place #" + raceFinishOrder.size() + "!")
+                        .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+                playRaceSound(player, "minecraft:ui.toast.challenge_complete", 0.8F, 1.0F);
+                broadcast(server, player.getGameProfile().name() + " finished the Boat Race in place #" + raceFinishOrder.size() + ".");
+            }
+        }
+
+        if (!joinedPlayers.isEmpty() && raceFinishOrder.size() >= joinedPlayers.size()) {
+            completeBoatRace(server, false);
+        } else if (joinedPlayers.isEmpty()) {
+            finishEvent(server, null, false);
+        }
+    }
+
+    private void completeBoatRace(MinecraftServer server, boolean timeLimitReached) {
+        List<UUID> ranking = new ArrayList<>(raceFinishOrder);
+        List<UUID> remaining = new ArrayList<>(joinedPlayers);
+        remaining.removeAll(ranking);
+        remaining.sort((first, second) -> Double.compare(raceProgress(second), raceProgress(first)));
+        ranking.addAll(remaining);
+
+        if (ranking.isEmpty()) {
+            finishEvent(server, null, false);
+            return;
+        }
+        raceFinishOrder.clear();
+        raceFinishOrder.addAll(ranking);
+        if (timeLimitReached) {
+            broadcast(server, "Boat Race time limit reached. Remaining racers are ranked by distance traveled.");
+        }
+        UUID winner = ranking.get(0);
+        for (int i = 0; i < ranking.size(); i++) {
+            ServerPlayer player = server.getPlayerList().getPlayer(ranking.get(i));
+            if (player != null) {
+                player.sendSystemMessage(Component.literal("Final Boat Race position: #" + (i + 1) + ".")
+                        .withStyle(i == 0 ? ChatFormatting.GOLD : ChatFormatting.AQUA));
+            }
+        }
+        finishEvent(server, winner, true);
+    }
+
+    private double raceProgress(UUID uuid) {
+        Entity boat = raceBoats.get(uuid);
+        return boat == null || boat.isRemoved() ? RACE_START_X : boat.getX();
+    }
+
+    private void playRaceSound(ServerPlayer player, String soundName, float volume, float pitch) {
+        Identifier id = Identifier.tryParse(soundName);
+        SoundEvent sound = id == null ? null : BuiltInRegistries.SOUND_EVENT.getValue(id);
+        if (sound != null) playSoundToPlayer(player, sound, SoundSource.MASTER, volume, pitch);
+    }
+
+    private void clearRaceBoats() {
+        for (Entity boat : new ArrayList<>(raceBoats.values())) {
+            if (boat != null && !boat.isRemoved()) boat.discard();
+        }
+        raceBoats.clear();
+        raceBoatSpawnPositions.clear();
+        raceLastX.clear();
+        raceJumpStage.clear();
+        raceLaneByPlayer.clear();
     }
 
     public void cancelEvent(MinecraftServer server) {
@@ -862,10 +1278,20 @@ public final class PartyGamesManager {
         paintFloor(Blocks.CONCRETE.black().defaultBlockState());
         if (awardPrizes && winner != null) {
             List<UUID> ranking = new ArrayList<>();
-            ranking.add(winner);
-            for (int i = eliminationOrder.size() - 1; i >= 0; i--) {
-                UUID uuid = eliminationOrder.get(i);
-                if (!ranking.contains(uuid)) ranking.add(uuid);
+            if (activeMinigame == Minigame.BOAT_RACE) {
+                ranking.addAll(raceFinishOrder);
+                List<UUID> remaining = new ArrayList<>(joinedPlayers);
+                remaining.removeAll(ranking);
+                remaining.sort((first, second) -> Double.compare(raceProgress(second), raceProgress(first)));
+                ranking.addAll(remaining);
+                ranking.remove(winner);
+                ranking.add(0, winner);
+            } else {
+                ranking.add(winner);
+                for (int i = eliminationOrder.size() - 1; i >= 0; i--) {
+                    UUID uuid = eliminationOrder.get(i);
+                    if (!ranking.contains(uuid)) ranking.add(uuid);
+                }
             }
             for (int index = 0; index < Math.min(3, ranking.size()); index++) {
                 UUID uuid = ranking.get(index);
@@ -873,11 +1299,12 @@ public final class PartyGamesManager {
                 givePrize(server, uuid, name, index + 1, config.prizeForPlace(index + 1));
             }
             String winnerName = entrantNames.getOrDefault(winner, "A player");
-            broadcast(server, winnerName + " won PartyGames: Dance Floor!");
+            broadcast(server, winnerName + " won PartyGames: " + minigameName(activeMinigame) + "!");
         } else if (winner == null && !joinedPlayers.isEmpty()) {
             broadcast(server, "PartyGames ended without a winner.");
         }
 
+        clearRaceBoats();
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
             if (player != null) returnPlayer(server, player);
@@ -901,12 +1328,14 @@ public final class PartyGamesManager {
         }
 
         phase = Phase.IDLE;
+        activeMinigame = Minigame.DANCE_FLOOR;
         joinedPlayers.clear();
         alivePlayers.clear();
         seatPositions.clear();
         spawnPositions.clear();
         eliminationOrder.clear();
         entrantNames.clear();
+        raceFinishOrder.clear();
         completedRounds = 0;
         phaseEndsAt = 0L;
         nextAutomaticEventAt = System.currentTimeMillis() + config.eventIntervalMinutes * 60_000L;
@@ -1291,7 +1720,7 @@ public final class PartyGamesManager {
     private void announceParticipation(MinecraftServer server) {
         Component announcement = Component.literal("PARTY GAMES ")
                 .withStyle(style -> style.withColor(ChatFormatting.AQUA).withBold(true))
-                .append(Component.literal("Dance Floor is open! ")
+                .append(Component.literal(minigameName(activeMinigame) + " is open! ")
                         .withStyle(ChatFormatting.LIGHT_PURPLE))
                 .append(Component.literal("Click Participate")
                         .withStyle(style -> style.withColor(ChatFormatting.GREEN)
