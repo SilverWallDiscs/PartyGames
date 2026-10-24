@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.1.5**
+**Current version: 0.1.6**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
@@ -23,6 +23,7 @@ The first playable minigame is **Dance Floor**:
 - On server shutdown, the active event is stopped without awarding prizes, temporary event entities are cleaned up, and player return locations remain saved so participants can be restored when they reconnect after the restart.
 - Reconnecting players keep their original pre-event snapshot if they rejoin before reconnect recovery runs; players stranded in the event dimension outside an active game are returned to the Overworld spawn with usable survival abilities.
 - Event invulnerability is enforced temporarily by the player-protection mixin rather than setting permanent invulnerability on the player; reconnect recovery runs immediately on join and resynchronizes the client's game mode when returning.
+- A per-tick recovery watchdog retries pending return sessions, moves unregistered players out of the event dimension during any phase, repairs stale Survival `mayBuild=false` state, and logs the exact player mode/abilities during reconnect and restoration for diagnosis.
 
 PartyGames is server-side. Players do not need to install the mod on their clients.
 
