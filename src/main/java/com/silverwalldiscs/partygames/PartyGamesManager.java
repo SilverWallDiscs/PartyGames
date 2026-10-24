@@ -481,6 +481,10 @@ public final class PartyGamesManager {
         // PlayerList no longer knows about that player. Sweep it on the server thread.
         purgeDisconnectedPlayerEntities(server);
 
+        // Run in every phase, not only while IDLE. A stale/unregistered player left in the
+        // reserved event dimension must never remain there just because the next game is open.
+        reconcileUnregisteredPlayers(server, "periodic recovery watchdog");
+
         // Keep event participants fed and rescue them if they escape the arena and fall into the void.
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
             ServerPlayer player = server.getPlayerList().getPlayer(uuid);
@@ -501,9 +505,6 @@ public final class PartyGamesManager {
         }
 
         if (phase == Phase.IDLE) {
-            // No player should remain in the reserved event dimension between games.
-            // This also repairs sessions left behind by an interrupted return/finish.
-            recoverOrphanedEventPlayers(server);
             if (now >= nextAutomaticEventAt) {
                 startRegistration(server, true);
             }
@@ -583,15 +584,13 @@ public final class PartyGamesManager {
             player.sendSystemMessage(Component.literal("You have already joined this event."));
             return 1;
         }
-        // A login can race with /partygames join. Restore the previous session before
-        // taking a new snapshot so an old event-dimension state cannot become the baseline.
-        if (player.level() == eventLevel) {
-            MinecraftServer server = player.level().getServer();
-            if (returnPoints.containsKey(uuid)) {
-                returnPlayer(server, player);
-            } else {
-                recoverPlayerWithoutReturnPoint(server, player, "join requested while still inside the event dimension");
-            }
+        // Restore any pending session before taking a new snapshot, regardless of the
+        // dimension where the player logged in. This also repairs a missed JOIN callback.
+        MinecraftServer server = player.level().getServer();
+        if (returnPoints.containsKey(uuid)) {
+            returnPlayer(server, player);
+        } else if (player.level() == eventLevel) {
+            recoverPlayerWithoutReturnPoint(server, player, "join requested while still inside the event dimension");
         }
 
         if (joinedPlayers.size() >= 200) {
@@ -639,6 +638,11 @@ public final class PartyGamesManager {
 
     public void onPlayerJoin(MinecraftServer server, ServerPlayer player) {
         UUID uuid = player.getUUID();
+        PartyGamesMod.LOGGER.info(
+                "PartyGames connection JOIN for {}: phase={}, dimension={}, gameMode={}, mayBuild={}, mayfly={}, permanentlyInvulnerable={}, joined={}, savedReturnPoint={}.",
+                player.getGameProfile().name(), phase, player.level().dimension().identifier(),
+                player.gameMode().getName(), player.getAbilities().mayBuild, player.getAbilities().mayfly,
+                player.isPermanentlyInvulnerable(), joinedPlayers.contains(uuid), returnPoints.containsKey(uuid));
         if (!joinedPlayers.contains(uuid)) {
             if (returnPoints.containsKey(uuid)) {
                 returnPlayer(server, player);
@@ -904,6 +908,23 @@ public final class PartyGamesManager {
             if (player != null) returnPlayer(server, player);
         }
 
+        // Defensive final pass: finish must not leave anyone in the event dimension,
+        // including stale online players that lost their UUID from joinedPlayers.
+        if (eventLevel != null) {
+            for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
+                if (player.level() != eventLevel) continue;
+                UUID uuid = player.getUUID();
+                PartyGamesMod.LOGGER.warn(
+                        "Player {} remained in PartyGames dimension at event finish; membership={}, hasReturnPoint={}, mode={}, mayBuild={}, invulnerable={}. Applying recovery.",
+                        player.getGameProfile().name(), joinedPlayers.contains(uuid), returnPoints.containsKey(uuid),
+                        player.gameMode().getName(), player.getAbilities().mayBuild, player.isPermanentlyInvulnerable());
+                if (returnPoints.containsKey(uuid)) returnPlayer(server, player);
+                if (player.level() == eventLevel) {
+                    recoverPlayerWithoutReturnPoint(server, player, "still in event dimension after finishEvent");
+                }
+            }
+        }
+
         phase = Phase.IDLE;
         joinedPlayers.clear();
         alivePlayers.clear();
@@ -1089,6 +1110,12 @@ public final class PartyGamesManager {
         player.getAbilities().flying = point.flying && point.mayfly;
         player.onUpdateAbilities();
         synchronizeClientGameMode(player, restoredGameMode);
+        PartyGamesMod.LOGGER.info(
+                "PartyGames restored {} from saved dimension {} to {}: mode={} (saved {}), mayBuild={} (saved {}), mayfly={}, invulnerable={} (saved {}, legacyCorruptSnapshot={}).",
+                player.getGameProfile().name(), point.dimension, destination.dimension().identifier(),
+                player.gameMode().getName(), point.gameMode, player.getAbilities().mayBuild, point.mayBuild,
+                player.getAbilities().mayfly, player.isPermanentlyInvulnerable(), point.invulnerable,
+                legacyCorruptSurvivalSnapshot);
         player.sendSystemMessage(Component.literal("You have been returned from PartyGames.")
                 .withStyle(ChatFormatting.LIGHT_PURPLE));
 
@@ -1098,17 +1125,47 @@ public final class PartyGamesManager {
         saveSessions();
     }
 
-    private void recoverOrphanedEventPlayers(MinecraftServer server) {
-        if (eventLevel == null) return;
-
+    private void reconcileUnregisteredPlayers(MinecraftServer server, String reason) {
         for (ServerPlayer player : new ArrayList<>(server.getPlayerList().getPlayers())) {
-            if (player.level() != eventLevel || joinedPlayers.contains(player.getUUID())) continue;
-
             UUID uuid = player.getUUID();
+            if (joinedPlayers.contains(uuid)) continue;
+
+            // A saved session is authoritative until restored; retry it from the tick loop
+            // if the JOIN callback was too early or failed to complete its teleport.
             if (returnPoints.containsKey(uuid)) {
+                PartyGamesMod.LOGGER.warn(
+                        "PartyGames found pending return state for online unregistered player {} during phase {}: currentDimension={}, currentMode={}, reason={}. Retrying restoration.",
+                        player.getGameProfile().name(), phase, player.level().dimension().identifier(),
+                        player.gameMode().getName(), reason);
                 returnPlayer(server, player);
-            } else {
-                recoverPlayerWithoutReturnPoint(server, player, "orphaned in the event dimension while no game is active");
+                continue;
+            }
+
+            // No unregistered player should ever remain in our reserved event dimension.
+            if (eventLevel != null && player.level() == eventLevel) {
+                PartyGamesMod.LOGGER.warn(
+                        "Recovery watchdog found unregistered player {} in PartyGames dimension during phase {}: mode={}, mayBuild={}, invulnerable={}, reason={}.",
+                        player.getGameProfile().name(), phase, player.gameMode().getName(),
+                        player.getAbilities().mayBuild, player.isPermanentlyInvulnerable(), reason);
+                recoverPlayerWithoutReturnPoint(server, player, "unregistered in event dimension during " + reason);
+                continue;
+            }
+
+            // Older PartyGames builds could persist Survival with mayBuild=false and
+            // permanent invulnerability. Repair that impossible Survival interaction state
+            // even if the old sessions.json entry has already been consumed.
+            if (player.gameMode().isSurvival() && !player.getAbilities().mayBuild) {
+                PartyGamesMod.LOGGER.warn(
+                        "Repairing stale PartyGames-like Survival abilities for {} outside the event dimension: mayBuild={}, invulnerable={}, reason={}.",
+                        player.getGameProfile().name(), player.getAbilities().mayBuild,
+                        player.isPermanentlyInvulnerable(), reason);
+                player.getAbilities().mayBuild = true;
+                player.getAbilities().instabuild = false;
+                if (player.isPermanentlyInvulnerable()) {
+                    player.setPermanentlyInvulnerable(false);
+                }
+                player.onUpdateAbilities();
+                synchronizeClientGameMode(player, GameType.SURVIVAL);
             }
         }
     }
@@ -1131,6 +1188,11 @@ public final class PartyGamesManager {
         player.getAbilities().flying = false;
         player.onUpdateAbilities();
         synchronizeClientGameMode(player, GameType.SURVIVAL);
+        PartyGamesMod.LOGGER.warn(
+                "PartyGames emergency recovery for {}: dimension={}, mode={}, mayBuild={}, mayfly={}, permanentlyInvulnerable={}, reason={}.",
+                player.getGameProfile().name(), player.level().dimension().identifier(),
+                player.gameMode().getName(), player.getAbilities().mayBuild, player.getAbilities().mayfly,
+                player.isPermanentlyInvulnerable(), reason);
 
         joinedPlayers.remove(uuid);
         alivePlayers.remove(uuid);
