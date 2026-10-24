@@ -22,6 +22,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permission;
+import net.minecraft.server.permissions.PermissionLevel;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.entity.player.Player;
@@ -98,7 +100,7 @@ public final class PartyGamesMod implements ModInitializer {
                         context.getSource().sendSuccess(() -> Component.literal(manager.status()), false);
                         return 1;
                     }))
-                    .then(Commands.literal("start").requires(source -> source.hasPermission(2)).executes(context ->
+                    .then(Commands.literal("start").requires(source -> source.permissions().hasPermission(new Permission.HasCommandLevel(PermissionLevel.GAMEMASTERS))).executes(context ->
                             manager.startRegistration(context.getSource().getServer(), false) ? 1 : 0))
                     .then(Commands.literal("stop").requires(source -> source.hasPermission(2)).executes(context -> {
                         manager.cancelEvent(context.getSource().getServer());
