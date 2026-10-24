@@ -1,5 +1,7 @@
 # PartyGames
 
+**Current version: 0.1.1**
+
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
 ## Current status
@@ -9,11 +11,11 @@ The first playable minigame is **Dance Floor**:
 - A purple announcement with a green clickable **[Participate]** button.
 - A dedicated flat **partygames:event** dimension supplied by an always-enabled built-in data pack.
 - The dance floor changes concrete colors while a random configured Minecraft music sound plays.
-- The sound stops after a random configured duration (20–60 seconds by default); the floor turns black and lime-wool cushions appear.
+- The sound stops after a random 10–30 seconds; the floor turns black and colored cushion entities appear. Players must right-click a free cushion to claim it.
 - For the first three cushion rounds the seat ratio defaults to 80%; after that it defaults to 50%. Seat counts are rounded down with a minimum of one seat while more than one player remains.
 - The last player standing wins. The next two places are awarded from the elimination order.
-- Event participants are made invulnerable; block placement/breaking, item use, entity interactions and item dropping are blocked. Their original dimension, position, view, invulnerability and flight/build abilities are restored afterward.
-- First-, second- and third-place prizes support multiple item stacks and multiple console commands.
+- Event participants are made invulnerable; block placement/breaking, item use and item dropping are blocked. Commands are disabled while inside the event dimension. The player's original dimension, position, view, game mode, invulnerability and flight/build abilities are restored afterward.
+- First-, second- and third-place prizes support multiple full item stacks (including custom components) and multiple commands. Use **/partygames modify** to open the admin editor; click **Add a command**, enter the command in chat when prompted, and click an existing command to remove it.
 - If reward items do not fit in a player's inventory, the leftovers are persisted and can be claimed with **/partygames retrieve**.
 - Return locations and pending rewards are persisted so a server restart does not strand a player in the event dimension or erase unclaimed items.
 
@@ -44,6 +46,7 @@ The arena is generated/cleared at the origin of **partygames:event**; that dimen
 - **/partygames start** — open registration immediately (operator permission required).
 - **/partygames stop** — cancel the current event and return participants (operator permission required).
 - **/partygames reload** — reload the JSON configuration (operator permission required).
+- **/partygames modify** — open the prize editor (operator permission required).
 
 ## Configuration
 
@@ -75,7 +78,7 @@ Example prize section:
 }
 ```
 
-The **commands** list is intentionally generic: each command runs as the server console. Replace the example with the correct command for your installed economy mod/plugin. This enables integration through a command bridge, including economy systems such as Impactor or Vault-compatible server stacks, without bundling or falsely claiming a direct Vault API dependency. On a pure Fabric server, Vault itself is a Bukkit API and needs a compatible bridge/plugin environment; PartyGames does not provide that bridge.
+The **commands** list is intentionally generic and is executed with the winner as the command source/entity and server-level permissions. This means selectors such as **@s** target the winner and **@p** resolves relative to their position. Replace examples with the syntax expected by your installed economy mod or command bridge.
 
 Item rewards that cannot fit are saved to **config/partygames/pending-rewards.json**; **/partygames retrieve** attempts to deliver them again. Console commands are executed once when a reward is awarded (or when an offline player's queued command reward is claimed). Keep reward commands trusted and admin-controlled.
 
