@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.2.0**
+**Current version: 0.2.1**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
@@ -41,10 +41,9 @@ PartyGames is server-side. Players do not need to install the mod on their clien
 2. Put the PartyGames JAR into the server's **mods** folder.
 3. Start the world once so the built-in event-dimension data pack can be registered and the config generated.
 4. Open **config/partygames/config.json** to customize event timing and rewards.
-5. Copy the supplied **horserace.schem** file into **config/partygames/horserace.schem**.
-6. Restart the server after first installation or after changing the bundled dimension data.
+5. Restart the server. The Horse Race schematic is bundled in the JAR; no external schematic file is required. An optional **config/partygames/horserace.schem** overrides the bundled course.
 
-The dance arena is generated at the origin of **partygames:event**. Horse Race pastes **config/partygames/horserace.schem** at X=5120 (320 chunks away) in that same reserved dimension.
+The dance arena is generated at the origin of **partygames:event**. Horse Race pastes its bundled schematic at X=5120 (320 chunks away) in that same reserved dimension.
 
 ## Commands
 
