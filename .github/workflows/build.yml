@@ -33,12 +33,22 @@ jobs:
         if: ${{ !hashFiles('src/main/resources/horserace.schem') }}
         run: |
           set -euo pipefail
-          jar_file="$(find legacy-artifact -type f -name '*.jar' -print -quit)"
-          test -n "$jar_file"
+          jar_file=""
+          while IFS= read -r candidate; do
+            if unzip -Z1 "$candidate" 2>/dev/null | grep -qx 'horserace.schem'; then
+              jar_file="$candidate"
+              break
+            fi
+          done < <(find legacy-artifact -type f -name '*.jar')
+          if [ -z "$jar_file" ]; then
+            echo "No JAR in the previous artifact contains horserace.schem"
+            find legacy-artifact -type f -print
+            exit 1
+          fi
           mkdir -p src/main/resources
           unzip -p "$jar_file" horserace.schem > src/main/resources/horserace.schem
           test "$(wc -c < src/main/resources/horserace.schem)" -eq 7779
-          echo "Restored horserace.schem ($(wc -c < src/main/resources/horserace.schem) bytes)"
+          echo "Restored horserace.schem from $jar_file ($(wc -c < src/main/resources/horserace.schem) bytes)"
       - name: Commit recovered schematic into main repository
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && hashFiles('src/main/resources/horserace.schem') != ''
         run: |
