@@ -1046,12 +1046,12 @@ public final class PartyGamesManager {
 
     private RaceSchematic loadHorseRaceSchematic() {
         java.nio.file.Path schematicPath = dataDirectory.resolve(HORSE_SCHEMATIC_FILENAME);
-        if (!Files.isRegularFile(schematicPath)) {
-            PartyGamesMod.LOGGER.error("Horse Race schematic file not found: {}. Copy horserace.schem into config/partygames/.",
-                    schematicPath);
+        InputStream bundled = PartyGamesManager.class.getResourceAsStream("/horserace.schem");
+        if (bundled == null && !Files.isRegularFile(schematicPath)) {
+            PartyGamesMod.LOGGER.error("Bundled Horse Race schematic is missing and no fallback file exists at {}.", schematicPath);
             return null;
         }
-        try (InputStream resource = Files.newInputStream(schematicPath);
+        try (InputStream resource = bundled != null ? bundled : Files.newInputStream(schematicPath);
              DataInputStream input = new DataInputStream(new GZIPInputStream(resource))) {
             if (input.readUnsignedByte() != 10) throw new IOException("Schematic root tag was not a compound.");
             input.readUTF();
