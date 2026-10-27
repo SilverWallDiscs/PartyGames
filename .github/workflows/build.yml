@@ -7,7 +7,7 @@ on:
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -20,7 +20,8 @@ jobs:
         with:
           java-version: '25'
           distribution: 'microsoft'
-      - name: Restore bundled Horse Race schematic
+      - name: Download previous JAR only if schematic is missing
+        if: ${{ !hashFiles('src/main/resources/horserace.schem') }}
         uses: actions/download-artifact@v6
         with:
           name: PartyGames-e5b5db9de8c20ce1823eee8640779eb1edcdd446
@@ -28,15 +29,27 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: 40439844736
-      - name: Extract schematic from previous bundled JAR
+      - name: Restore schematic if missing
+        if: ${{ !hashFiles('src/main/resources/horserace.schem') }}
         run: |
           set -euo pipefail
           jar_file="$(find legacy-artifact -type f -name '*.jar' -print -quit)"
           test -n "$jar_file"
           mkdir -p src/main/resources
           unzip -p "$jar_file" horserace.schem > src/main/resources/horserace.schem
-          test -s src/main/resources/horserace.schem
+          test "$(wc -c < src/main/resources/horserace.schem)" -eq 7779
           echo "Restored horserace.schem ($(wc -c < src/main/resources/horserace.schem) bytes)"
+      - name: Commit recovered schematic into main repository
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && hashFiles('src/main/resources/horserace.schem') != ''
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch src/main/resources/horserace.schem >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add src/main/resources/horserace.schem
+            git commit -m "Bundle Horse Race schematic as a project resource"
+            git push
+          fi
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
