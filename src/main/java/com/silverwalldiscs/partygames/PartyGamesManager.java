@@ -46,6 +46,8 @@ import net.minecraft.util.Prediction;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.level.ServerBossEvent;
+import net.minecraft.world.BossEvent;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.player.Player;
@@ -95,7 +97,7 @@ public final class PartyGamesManager {
     private static final int HORSE_BOOST_DURATION_TICKS = 60;
     private static final int HORSE_BOOST_AMPLIFIER = 2;
     private static final int HORSE_COUNTDOWN_SECONDS = 5;
-    private static final long RACE_TIMEOUT_MILLIS = 180_000L;
+    private static final long RACE_TIMEOUT_MILLIS = 90_000L;
     private static final String HORSE_SCHEMATIC_FILENAME = "horserace.schem";
     private static final Pattern NUMBER_PATTERN = Pattern.compile("\\d+");
     private static final Random RANDOM = new Random();
@@ -162,6 +164,8 @@ public final class PartyGamesManager {
     private RaceSchematic horseRaceSchematic;
     private boolean raceTrackPrepared;
     private final List<UUID> raceFinishOrder = new ArrayList<>();
+    private final ServerBossEvent partyGamesBossBar = new ServerBossEvent(
+            Component.literal("PartyGames"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.PROGRESS);
 
     private Phase phase = Phase.IDLE;
     private Minigame activeMinigame = Minigame.DANCE_FLOOR;
@@ -575,6 +579,7 @@ public final class PartyGamesManager {
         // Run in every phase, not only while IDLE. A stale/unregistered player left in the
         // reserved event dimension must never remain there just because the next game is open.
         reconcileUnregisteredPlayers(server, "periodic recovery watchdog");
+        updatePartyGamesBossBar(server);
 
         // Keep event participants fed and rescue them if they escape the arena and fall into the void.
         for (UUID uuid : new ArrayList<>(joinedPlayers)) {
@@ -1000,14 +1005,6 @@ public final class PartyGamesManager {
                 .min(java.util.Comparator.comparingDouble(entity -> entity.distanceToSqr(x, y, z)))
                 .orElse(null);
         if (horse != null) {
-            // In current Minecraft versions, equip the saddle through the entity equipment slot
-            // command; the legacy SaddleItem summon tag alone is not reliable.
-            server.getCommands().performPrefixedCommand(
-                    server.createCommandSourceStack()
-                            .withLevel(eventLevel)
-                            .withPosition(new Vec3(x, y, z))
-                            .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
-                    "item replace entity @e[type=minecraft:horse,sort=nearest,limit=1] saddle with minecraft:saddle");
             String attributeCommand = "attribute @e[type=minecraft:horse,sort=nearest,limit=1] "
                     + "minecraft:movement_speed base set " + HORSE_MOVE_SPEED;
             server.getCommands().performPrefixedCommand(
@@ -1016,6 +1013,9 @@ public final class PartyGamesManager {
                             .withPosition(new Vec3(x, y, z))
                             .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
                     attributeCommand);
+            if (horse instanceof net.minecraft.world.entity.LivingEntity livingHorse) {
+                livingHorse.addEffect(new MobEffectInstance(MobEffects.SPEED, -1, 2, false, false, true));
+            }
         }
         return horse;
     }
@@ -1314,6 +1314,50 @@ public final class PartyGamesManager {
         }
     }
 
+    private void updatePartyGamesBossBar(MinecraftServer server) {
+        Set<UUID> inEvent = new HashSet<>();
+        for (UUID uuid : joinedPlayers) {
+            ServerPlayer player = server.getPlayerList().getPlayer(uuid);
+            if (player != null && player.level() == eventLevel) {
+                inEvent.add(uuid);
+                partyGamesBossBar.addPlayer(player);
+            }
+        }
+        for (ServerPlayer player : new ArrayList<>(partyGamesBossBar.getPlayers())) {
+            if (!inEvent.contains(player.getUUID())) partyGamesBossBar.removePlayer(player);
+        }
+        if (inEvent.isEmpty() || phase == Phase.IDLE) {
+            partyGamesBossBar.setVisible(false);
+            return;
+        }
+        long remaining = Math.max(0L, phaseEndsAt - System.currentTimeMillis());
+        int seconds = (int) Math.ceil(remaining / 1000.0D);
+        String title;
+        float progress;
+        if (phase == Phase.JOINING) {
+            title = "PartyGames starts in " + formatBossbarTime(seconds);
+            progress = Math.max(0.0F, Math.min(1.0F, remaining / (config.joinDurationSeconds * 1000.0F)));
+        } else if (phase == Phase.RACE_COUNTDOWN) {
+            title = "Horse Race starts in " + Math.max(0, countdownValue + 1) + "s";
+            progress = Math.max(0.0F, Math.min(1.0F, (countdownValue + 1) / (float) HORSE_COUNTDOWN_SECONDS));
+        } else if (phase == Phase.RACE_RUNNING) {
+            title = "Horse Race ends in " + formatBossbarTime(seconds);
+            progress = Math.max(0.0F, Math.min(1.0F, remaining / (float) RACE_TIMEOUT_MILLIS));
+        } else {
+            title = (phase == Phase.DANCING ? "Dance Floor round ends in " : "Seat rush ends in ") + formatBossbarTime(seconds);
+            progress = Math.max(0.0F, Math.min(1.0F, remaining / 60_000.0F));
+        }
+        partyGamesBossBar.setName(Component.literal(title));
+        partyGamesBossBar.setProgress(progress);
+        partyGamesBossBar.setColor(phase == Phase.RACE_RUNNING ? BossEvent.BossBarColor.GREEN : BossEvent.BossBarColor.YELLOW);
+        partyGamesBossBar.setVisible(true);
+    }
+
+    private String formatBossbarTime(int seconds) {
+        int safe = Math.max(0, seconds);
+        return safe < 60 ? safe + "s" : (safe / 60) + "m " + (safe % 60) + "s";
+    }
+
     private void tickHorseRace(MinecraftServer server, long now) {
         if (now >= phaseEndsAt) {
             completeHorseRace(server, true);
@@ -1330,6 +1374,17 @@ public final class PartyGamesManager {
                 continue;
             }
             if (player.getVehicle() != horse) player.startRiding(horse, true, true);
+            // Saddles are intentionally absent; steer the horse from the rider input instead.
+            float forward = player.zza;
+            if (Math.abs(forward) > 0.01F) {
+                double yaw = Math.toRadians(player.getYRot());
+                double speed = forward >= 0.0F ? 0.28D : 0.12D;
+                double vx = -Math.sin(yaw) * speed * Math.abs(forward);
+                double vz = Math.cos(yaw) * speed * Math.abs(forward);
+                Vec3 oldVelocity = horse.getDeltaMovement();
+                horse.setYRot(player.getYRot());
+                horse.setDeltaMovement(vx, oldVelocity.y, vz);
+            }
 
             BlockPos under = BlockPos.containing(horse.getX(), horse.getY() - 0.05D, horse.getZ());
             if (horse.getY() >= RACE_TRACK_ORIGIN_Y + 1.0D && !eventLevel.getBlockState(under).isAir()) {
@@ -1366,9 +1421,9 @@ public final class PartyGamesManager {
             if (onBoost && horseRaceOnBoostBlock.add(uuid)) {
                 if (horse instanceof net.minecraft.world.entity.LivingEntity livingHorse) {
                     livingHorse.addEffect(new MobEffectInstance(MobEffects.SPEED,
-                            HORSE_BOOST_DURATION_TICKS, HORSE_BOOST_AMPLIFIER));
+                            HORSE_BOOST_DURATION_TICKS, 4, false, false, true));
                 }
-                player.sendSystemMessage(Component.literal("SPEED III! +3 seconds!")
+                player.sendSystemMessage(Component.literal("SPEED V! +3 seconds!")
                         .withStyle(ChatFormatting.LIGHT_PURPLE, ChatFormatting.BOLD));
                 playRaceSound(player, "minecraft:entity.horse.gallop", 0.8F, 1.35F);
             } else if (!onBoost) {
@@ -1379,6 +1434,7 @@ public final class PartyGamesManager {
             double localX = currentX - RACE_TRACK_ORIGIN_X;
             if (previousZ > finishLineZ && currentZ <= finishLineZ
                     && localX >= HORSE_FINISH_MIN_X && localX <= HORSE_FINISH_MAX_X + 1.0D
+                    && isOakLogFinishLine(currentX, horse.getY())
                     && totalDistance >= HORSE_MIN_FINISH_DISTANCE) {
                 raceFinishOrder.add(uuid);
                 horse.setDeltaMovement(Vec3.ZERO);
@@ -1397,6 +1453,20 @@ public final class PartyGamesManager {
         } else if (joinedPlayers.isEmpty()) {
             finishEvent(server, null, false);
         }
+    }
+
+    private boolean isOakLogFinishLine(double worldX, double horseY) {
+        if (eventLevel == null) return false;
+        int minX = RACE_TRACK_ORIGIN_X + HORSE_FINISH_MIN_X;
+        int maxX = RACE_TRACK_ORIGIN_X + HORSE_FINISH_MAX_X;
+        int centerY = BlockPos.containing(worldX, horseY, RACE_TRACK_ORIGIN_Z + HORSE_FINISH_Z).getY();
+        for (int x = minX; x <= maxX; x++) {
+            for (int dy = -1; dy <= 2; dy++) {
+                BlockPos pos = new BlockPos(x, centerY + dy, RACE_TRACK_ORIGIN_Z + HORSE_FINISH_Z);
+                if (eventLevel.getBlockState(pos).is(Blocks.OAK_LOG)) return true;
+            }
+        }
+        return false;
     }
 
     private void completeHorseRace(MinecraftServer server, boolean timeLimitReached) {
