@@ -165,7 +165,7 @@ public final class PartyGamesManager {
     private boolean raceTrackPrepared;
     private final List<UUID> raceFinishOrder = new ArrayList<>();
     private final ServerBossEvent partyGamesBossBar = new ServerBossEvent(
-            Component.literal("PartyGames"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.PROGRESS);
+            UUID.randomUUID(), Component.literal("PartyGames"), BossEvent.BossBarColor.GREEN, BossEvent.BossBarOverlay.PROGRESS);
 
     private Phase phase = Phase.IDLE;
     private Minigame activeMinigame = Minigame.DANCE_FLOOR;
