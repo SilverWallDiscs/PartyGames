@@ -1,12 +1,12 @@
 # PartyGames
 
-**Current version: 0.1.9**
+**Current version: 0.2.0**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
 ## Current status
 
-The available minigames are **Dance Floor** (also selectable as *Music Chairs*) and **Boat Race**:
+The available minigames are **Dance Floor** (also selectable as *Music Chairs*) and **Horse Race**:
 - Automatic events on a configurable interval, plus an admin start command.
 - A purple announcement with a green clickable **[Participate]** button.
 - A dedicated flat **partygames:event** dimension supplied by an always-enabled built-in data pack.
@@ -41,9 +41,10 @@ PartyGames is server-side. Players do not need to install the mod on their clien
 2. Put the PartyGames JAR into the server's **mods** folder.
 3. Start the world once so the built-in event-dimension data pack can be registered and the config generated.
 4. Open **config/partygames/config.json** to customize event timing and rewards.
-5. Restart the server after first installation or after changing the bundled dimension data.
+5. Copy the supplied **horserace.schem** file into **config/partygames/horserace.schem**.
+6. Restart the server after first installation or after changing the bundled dimension data.
 
-The dance arena is generated at the origin of **partygames:event**. Boat Race uses the bundled schematic more than 300 chunks away in that same reserved dimension.
+The dance arena is generated at the origin of **partygames:event**. Horse Race pastes **config/partygames/horserace.schem** at X=5120 (320 chunks away) in that same reserved dimension.
 
 ## Commands
 
@@ -52,8 +53,8 @@ The dance arena is generated at the origin of **partygames:event**. Boat Race us
 - **/partygames retrieve** — retrieve pending prize items or queued offline command rewards.
 - **/partygames start** — open Dance Floor registration immediately (operator permission required).
 - **/partygames start Music Chairs** — alias for Dance Floor / musical chairs (operator permission required).
-- **/partygames start Boat Race** — open registration for the ice boat-racing minigame.
-- Boat Race pastes the supplied `packeticetrack.schem` as a single 162×8×250 packed-ice course at X=5120 in the event dimension (320 chunks from the dance arena). The course has a shared start point, a 5-second private countdown with sounds, a maximum of 16 racers, honey slow blocks and a slime jump pad. Race boats do not collide with each other and can step up blocks up to one block high.
+- **/partygames start Horse Race** — open registration for the schematic-based horse race.
+- Horse Race supports up to 6 riders, places their saddled horses on the lime-wool start line, and gives each horse a different coat pattern with the same base movement speed. Shift-dismount is blocked until results are declared; fallen horses are teleported back above the course. The 5-second private countdown opens the stone-brick/barrier gate at GO. Crossing the oak-wood finish strip under the black-and-white wool flag records the first three places. Touching magenta glazed terracotta grants Speed III for 3 seconds.
 - **/partygames stop** — cancel the current event and return participants (operator permission required).
 - **/partygames reload** — reload the JSON configuration (operator permission required).
 - **/partygames modify** — open the prize editor (operator permission required).

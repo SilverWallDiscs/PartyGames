@@ -53,6 +53,10 @@ public final class PartyGamesMod implements ModInitializer {
         return manager != null && manager.isProtected(uuid);
     }
 
+    public boolean shouldPreventHorseDismount(ServerPlayer player) {
+        return manager != null && manager.shouldPreventHorseDismount(player);
+    }
+
     public boolean capturePendingPrizeCommand(ServerPlayer player, String command) {
         return manager != null && manager.capturePendingPrizeCommand(player, command);
     }
@@ -97,7 +101,7 @@ public final class PartyGamesMod implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 manager.onPlayerDisconnect(server, handler.player));
 
-        LOGGER.info("PartyGames loaded. The first minigame is Dance Floor.");
+        LOGGER.info("PartyGames loaded. Available minigames: Dance Floor and Horse Race.");
     }
 
     private void registerCommands() {
@@ -124,14 +128,14 @@ public final class PartyGamesMod implements ModInitializer {
                                     .suggests((context, builder) -> {
                                         builder.suggest("Dance Floor");
                                         builder.suggest("Music Chairs");
-                                        builder.suggest("Boat Race");
+                                        builder.suggest("Horse Race");
                                         return builder.buildFuture();
                                     })
                                     .executes(context -> {
                                         String selected = StringArgumentType.getString(context, "minigame");
                                         if (!manager.isSupportedGameSelection(selected)) {
                                             context.getSource().sendFailure(Component.literal(
-                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Boat Race."));
+                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Horse Race."));
                                             return 0;
                                         }
                                         return manager.startSelectedGame(context.getSource().getServer(), selected, false) ? 1 : 0;
