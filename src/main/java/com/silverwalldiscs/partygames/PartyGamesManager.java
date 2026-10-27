@@ -201,6 +201,12 @@ public final class PartyGamesManager {
                 && raceHorses.containsKey(uuid);
     }
 
+    public boolean shouldBlockRaceHorseInteraction(Entity entity) {
+        return entity != null
+                && (phase == Phase.RACE_COUNTDOWN || phase == Phase.RACE_RUNNING)
+                && raceHorses.containsValue(entity);
+    }
+
     public boolean isCommandsBlocked(ServerPlayer player) {
         return player != null && (PartyGamesMod.MOD_ID + ":event").equals(
                 player.level().dimension().identifier().toString());
@@ -1293,14 +1299,16 @@ public final class PartyGamesManager {
 
     private void openHorseRaceGate() {
         if (eventLevel == null) return;
-        BlockState air = Blocks.AIR.defaultBlockState();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
-        // The start line is at local Z=141..142; open the gate on its far side.
-        for (int x = 118; x <= 129; x++) {
-            for (int y = 5; y <= 12; y++) {
-                for (int z = 143; z <= 144; z++) {
-                    pos.set(RACE_TRACK_ORIGIN_X + x, RACE_TRACK_ORIGIN_Y + y, RACE_TRACK_ORIGIN_Z + z);
-                    eventLevel.setBlock(pos, air, 2);
+
+        // Remove only the three horizontal courses of stone-brick wall at the current
+        // gate side (local Z=147). Do not clear surrounding blocks: moss and barriers
+        // are part of the build and must remain untouched.
+        for (int x = 118; x <= 127; x++) {
+            for (int y = 8; y <= 10; y++) {
+                pos.set(RACE_TRACK_ORIGIN_X + x, RACE_TRACK_ORIGIN_Y + y, RACE_TRACK_ORIGIN_Z + 147);
+                if (eventLevel.getBlockState(pos).is(Blocks.STONE_BRICK_WALL)) {
+                    eventLevel.setBlock(pos, Blocks.AIR.defaultBlockState(), 2);
                 }
             }
         }
