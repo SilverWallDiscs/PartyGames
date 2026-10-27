@@ -1550,7 +1550,7 @@ public final class PartyGamesManager {
     private void finishEvent(MinecraftServer server, UUID winner, boolean awardPrizes) {
         stopMusic();
         clearCushions();
-        paintFloor(Blocks.CONCRETE.black().defaultBlockState());
+        if (activeMinigame == Minigame.DANCE_FLOOR) paintFloor(Blocks.CONCRETE.black().defaultBlockState());
         if (awardPrizes && winner != null) {
             List<UUID> ranking = new ArrayList<>();
             if (activeMinigame == Minigame.HORSE_RACE) {
