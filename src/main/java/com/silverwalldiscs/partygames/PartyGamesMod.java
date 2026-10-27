@@ -57,6 +57,10 @@ public final class PartyGamesMod implements ModInitializer {
         return manager != null && manager.shouldPreventHorseDismount(player);
     }
 
+    public boolean shouldBlockRaceHorseInteraction(Entity entity) {
+        return manager != null && manager.shouldBlockRaceHorseInteraction(entity);
+    }
+
     public boolean capturePendingPrizeCommand(ServerPlayer player, String command) {
         return manager != null && manager.capturePendingPrizeCommand(player, command);
     }
@@ -174,6 +178,8 @@ public final class PartyGamesMod implements ModInitializer {
         AttackEntityCallback.EVENT.register((player, level, hand, entity, hit) ->
                 protectedInteraction(player) ? InteractionResult.FAIL : InteractionResult.PASS);
         UseEntityCallback.EVENT.register((player, level, hand, entity, hit) -> {
+            // No player, including spectators, may open a race horse's inventory and remove its saddle.
+            if (manager.shouldBlockRaceHorseInteraction(entity)) return InteractionResult.FAIL;
             if (!protectedInteraction(player)) return InteractionResult.PASS;
             if (player instanceof ServerPlayer serverPlayer && manager.tryMountCushion(serverPlayer, entity)) {
                 return InteractionResult.SUCCESS;
