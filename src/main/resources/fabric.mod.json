@@ -3,7 +3,7 @@
   "id": "partygames",
   "version": "${version}",
   "name": "PartyGames",
-  "description": "Recurring server-side minigame events with configurable prizes. First game: Dance Floor.",
+  "description": "Recurring server-side minigame events with configurable prizes, including Dance Floor and Horse Race.",
   "authors": ["SilverWallDiscs"],
   "contact": {
     "sources": "https://github.com/SilverWallDiscs/PartyGames"
