@@ -840,19 +840,37 @@ public final class PartyGamesManager {
     private void rescueRacer(ServerPlayer player) {
         UUID uuid = player.getUUID();
         Entity horse = raceHorses.get(uuid);
-        Vec3 start = horseRaceLastSafePositions.getOrDefault(uuid, horseRaceStartPositions.get(uuid));
-        if (eventLevel == null || horse == null || start == null || horse.isRemoved()) {
-            returnPlayer(player.level().getServer(), player);
-            return;
+        Vec3 safe = horseRaceLastSafePositions.getOrDefault(uuid, horseRaceStartPositions.get(uuid));
+        if (eventLevel == null) return;
+        if (safe == null) {
+            safe = new Vec3(RACE_TRACK_ORIGIN_X + HORSE_START_MIN_X + 0.5D,
+                    RACE_TRACK_ORIGIN_Y + HORSE_START_Y,
+                    RACE_TRACK_ORIGIN_Z + HORSE_START_MIN_Z + 0.5D);
         }
-        // Rescue the mount without attempting to dismount the participant; shift-dismount
-        // remains blocked for the entire race lifecycle.
-        horse.teleportTo(eventLevel, start.x, start.y, start.z, Set.of(), 180.0F, 0.0F, true);
-        horse.setDeltaMovement(Vec3.ZERO);
-        horse.resetFallDistance();
-        horseRaceLastX.put(uuid, start.x);
-        horseRaceLastZ.put(uuid, start.z);
-        player.sendSystemMessage(Component.literal("Your horse fell; it was moved back above the course.")
+
+        // Never send a racer to their original world while the race is active.
+        // Reset both entities' motion before/after teleporting so fall momentum cannot
+        // kill the rider or immediately throw the horse off the course again.
+        if (horse != null && !horse.isRemoved()) {
+            horse.setDeltaMovement(Vec3.ZERO);
+            horse.resetFallDistance();
+            horse.teleportTo(eventLevel, safe.x, safe.y, safe.z, Set.of(), 180.0F, 0.0F, true);
+            horse.setDeltaMovement(Vec3.ZERO);
+            horse.resetFallDistance();
+        }
+        player.setDeltaMovement(Vec3.ZERO);
+        player.resetFallDistance();
+        player.teleportTo(eventLevel, safe.x, safe.y + 0.1D, safe.z, Set.of(),
+                player.getYRot(), 0.0F, true);
+        player.setDeltaMovement(Vec3.ZERO);
+        player.resetFallDistance();
+        if (horse != null && !horse.isRemoved() && !player.isPassenger()) {
+            player.startRiding(horse, true, true);
+        }
+        horseRaceLastSafePositions.put(uuid, safe);
+        horseRaceLastX.put(uuid, safe.x);
+        horseRaceLastZ.put(uuid, safe.z);
+        player.sendSystemMessage(Component.literal("You were returned safely to the Horse Race course.")
                 .withStyle(ChatFormatting.YELLOW));
     }
 
