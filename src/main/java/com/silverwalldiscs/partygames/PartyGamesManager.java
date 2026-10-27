@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -916,7 +917,6 @@ public final class PartyGamesManager {
                 continue;
             }
 
-            horse.setInvulnerable(true);
             horse.setYRot(180.0F);
             horse.setXRot(0.0F);
             horse.setDeltaMovement(Vec3.ZERO);
@@ -1325,7 +1325,8 @@ public final class PartyGamesManager {
             horseRaceDistance.put(uuid, totalDistance);
 
             BlockPos feetBlock = BlockPos.containing(horse.getX(), horse.getY() - 0.05D, horse.getZ());
-            boolean onBoost = eventLevel.getBlockState(feetBlock).is(Blocks.MAGENTA_GLAZED_TERRACOTTA);
+            boolean onBoost = "minecraft:magenta_glazed_terracotta".equals(
+                    BuiltInRegistries.BLOCK.getKey(eventLevel.getBlockState(feetBlock).getBlock()).toString());
             if (onBoost && horseRaceOnBoostBlock.add(uuid)) {
                 if (horse instanceof net.minecraft.world.entity.LivingEntity livingHorse) {
                     livingHorse.addEffect(new MobEffectInstance(MobEffects.SPEED,
