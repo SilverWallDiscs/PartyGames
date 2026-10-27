@@ -53,6 +53,10 @@ public final class PartyGamesMod implements ModInitializer {
         return manager != null && manager.isProtected(uuid);
     }
 
+    public boolean shouldPreventHorseDismount(ServerPlayer player) {
+        return manager != null && manager.shouldPreventHorseDismount(player);
+    }
+
     public boolean capturePendingPrizeCommand(ServerPlayer player, String command) {
         return manager != null && manager.capturePendingPrizeCommand(player, command);
     }
