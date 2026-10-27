@@ -291,8 +291,7 @@ public final class PartyGamesManager {
         String value = selection.trim().toLowerCase(java.util.Locale.ROOT)
                 .replace('_', ' ').replace('-', ' ').replaceAll("\\s+", " ");
         return switch (value) {
-            case "dance floor", "music chair", "music chairs", "musical chairs", "musical chair",
-                    "dance", "chairs", "chair" -> Minigame.DANCE_FLOOR;
+            case "dance floor", "dance" -> Minigame.DANCE_FLOOR;
             case "horse race", "horse racing", "horse", "race", "racing", "carrera de caballos",
                     "caballos" -> Minigame.HORSE_RACE;
             default -> null;
@@ -998,6 +997,14 @@ public final class PartyGamesManager {
                         .withPosition(new Vec3(x, y, z))
                         .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
                 command);
+        // Equip the saddle in the horse equipment slot. Race horse interaction is blocked
+        // while the event runs, so players cannot open the inventory and remove it.
+        server.getCommands().performPrefixedCommand(
+                server.createCommandSourceStack()
+                        .withLevel(eventLevel)
+                        .withPosition(new Vec3(x, y, z))
+                        .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
+                "item replace entity @e[type=minecraft:horse,sort=nearest,limit=1] saddle with minecraft:saddle");
 
         AABB nearby = new AABB(x - 2.0D, y - 2.0D, z - 2.0D, x + 2.0D, y + 3.0D, z + 2.0D);
         Entity horse = eventLevel.getEntitiesOfClass(Entity.class, nearby, this::isHorse).stream()
@@ -1343,9 +1350,12 @@ public final class PartyGamesManager {
         } else if (phase == Phase.RACE_RUNNING) {
             title = "Horse Race ends in " + formatBossbarTime(seconds);
             progress = Math.max(0.0F, Math.min(1.0F, remaining / (float) RACE_TIMEOUT_MILLIS));
+        } else if (phase == Phase.DANCING) {
+            title = "Dance Floor - Keep moving!";
+            progress = 1.0F;
         } else {
-            title = (phase == Phase.DANCING ? "Dance Floor round ends in " : "Seat rush ends in ") + formatBossbarTime(seconds);
-            progress = Math.max(0.0F, Math.min(1.0F, remaining / 60_000.0F));
+            title = "Find a cushion!";
+            progress = 1.0F;
         }
         partyGamesBossBar.setName(Component.literal(title));
         partyGamesBossBar.setProgress(progress);
@@ -1598,9 +1608,10 @@ public final class PartyGamesManager {
             spawnCushion(pos);
         }
 
-        phaseEndsAt = System.currentTimeMillis() + config.seatTimeSeconds * 1000L;
+        int seatRushSeconds = ThreadLocalRandom.current().nextInt(5, 11);
+        phaseEndsAt = System.currentTimeMillis() + seatRushSeconds * 1000L;
         broadcast(server, "Music stopped! Right-click a cushion to sit! " + desiredSeats + " cushion(s) for "
-                + alivePlayers.size() + " player(s) — " + config.seatTimeSeconds + " seconds!");
+                + alivePlayers.size() + " player(s)!");
     }
 
     private void resolveSeatRush(MinecraftServer server) {
