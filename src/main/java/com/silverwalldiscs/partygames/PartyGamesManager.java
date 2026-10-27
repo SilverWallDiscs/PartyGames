@@ -854,7 +854,7 @@ public final class PartyGamesManager {
         if (horse != null && !horse.isRemoved()) {
             horse.setDeltaMovement(Vec3.ZERO);
             horse.resetFallDistance();
-            horse.teleportTo(eventLevel, safe.x, safe.y, safe.z, Set.of(), 180.0F, 0.0F, true);
+            horse.teleportTo(eventLevel, safe.x, safe.y, safe.z, Set.of(), 0.0F, 0.0F, true);
             horse.setDeltaMovement(Vec3.ZERO);
             horse.resetFallDistance();
         }
@@ -937,7 +937,7 @@ public final class PartyGamesManager {
                 continue;
             }
 
-            horse.setYRot(180.0F);
+            horse.setYRot(0.0F);
             horse.setXRot(0.0F);
             horse.setDeltaMovement(Vec3.ZERO);
             player.stopRiding();
@@ -980,7 +980,7 @@ public final class PartyGamesManager {
     private Entity summonRaceHorse(MinecraftServer server, double x, double y, double z, int variant) {
         String command = "summon minecraft:horse " + x + " " + y + " " + z
                 + " {Tame:1b,Temper:100,Variant:" + variant
-                + ",PersistenceRequired:1b,Invulnerable:1b,SaddleItem:{id:\"minecraft:saddle\",count:1}}";
+                + ",PersistenceRequired:1b,Invulnerable:1b,Saddle:1b,SaddleItem:{id:\"minecraft:saddle\",count:1}}";
         server.getCommands().performPrefixedCommand(
                 server.createCommandSourceStack()
                         .withLevel(eventLevel)
@@ -1016,12 +1016,9 @@ public final class PartyGamesManager {
             return false;
         }
 
-        if (!raceTrackPrepared) {
-            clearBlockBox(RACE_TRACK_ORIGIN_X - 8, RACE_TRACK_ORIGIN_X + 392,
-                    RACE_TRACK_ORIGIN_Y - 1, RACE_TRACK_ORIGIN_Y + 4, -35, 35,
-                    Blocks.AIR.defaultBlockState());
-            raceTrackPrepared = true;
-        }
+        // Do not clear a broad box before pasting the course: that used to erase
+        // moss and barrier blocks around the start area. Only paste schematic blocks.
+        raceTrackPrepared = true;
 
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
         for (SchematicBlock block : schematic.blocks) {
@@ -1253,7 +1250,7 @@ public final class PartyGamesManager {
             Vec3 startPos = horseRaceStartPositions.get(entry.getKey());
             if (horse == null || startPos == null || horse.isRemoved()) continue;
             horse.setDeltaMovement(Vec3.ZERO);
-            horse.teleportTo(eventLevel, startPos.x, startPos.y, startPos.z, Set.of(), 180.0F, 0.0F, true);
+            horse.teleportTo(eventLevel, startPos.x, startPos.y, startPos.z, Set.of(), 0.0F, 0.0F, true);
             ServerPlayer player = eventLevel.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player != null && player.getVehicle() != horse) player.startRiding(horse, true, true);
         }
@@ -1290,9 +1287,10 @@ public final class PartyGamesManager {
         if (eventLevel == null) return;
         BlockState air = Blocks.AIR.defaultBlockState();
         BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        // The start line is at local Z=141..142; open the gate on its far side.
         for (int x = 118; x <= 129; x++) {
             for (int y = 5; y <= 12; y++) {
-                for (int z = 137; z <= 138; z++) {
+                for (int z = 143; z <= 144; z++) {
                     pos.set(RACE_TRACK_ORIGIN_X + x, RACE_TRACK_ORIGIN_Y + y, RACE_TRACK_ORIGIN_Z + z);
                     eventLevel.setBlock(pos, air, 2);
                 }
