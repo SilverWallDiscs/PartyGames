@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -16,12 +20,35 @@ jobs:
         with:
           java-version: '25'
           distribution: 'microsoft'
+      - name: Restore bundled Horse Race schematic
+        uses: actions/download-artifact@v6
+        with:
+          name: PartyGames-e5b5db9de8c20ce1823eee8640779eb1edcdd446
+          path: legacy-artifact
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 40439844736
+      - name: Extract schematic from previous bundled JAR
+        run: |
+          set -euo pipefail
+          jar_file="$(find legacy-artifact -type f -name '*.jar' -print -quit)"
+          test -n "$jar_file"
+          mkdir -p src/main/resources
+          unzip -p "$jar_file" horserace.schem > src/main/resources/horserace.schem
+          test -s src/main/resources/horserace.schem
+          echo "Restored horserace.schem ($(wc -c < src/main/resources/horserace.schem) bytes)"
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.7.1'
       - name: Build
         run: gradle build --no-daemon
+      - name: Verify schematic is bundled in mod JAR
+        run: |
+          set -euo pipefail
+          jar_file="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-sources.jar' -print -quit)"
+          test -n "$jar_file"
+          unzip -l "$jar_file" | grep -E '[[:space:]]horserace\.schem$'
       - name: Upload mod JAR
         uses: actions/upload-artifact@v7
         with:
