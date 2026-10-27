@@ -131,7 +131,6 @@ public final class PartyGamesMod implements ModInitializer {
                             .then(Commands.argument("minigame", StringArgumentType.greedyString())
                                     .suggests((context, builder) -> {
                                         builder.suggest("Dance Floor");
-                                        builder.suggest("Music Chairs");
                                         builder.suggest("Horse Race");
                                         return builder.buildFuture();
                                     })
@@ -139,7 +138,7 @@ public final class PartyGamesMod implements ModInitializer {
                                         String selected = StringArgumentType.getString(context, "minigame");
                                         if (!manager.isSupportedGameSelection(selected)) {
                                             context.getSource().sendFailure(Component.literal(
-                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Horse Race."));
+                                                    "Unknown PartyGames minigame. Use Dance Floor or Horse Race."));
                                             return 0;
                                         }
                                         return manager.startSelectedGame(context.getSource().getServer(), selected, false) ? 1 : 0;
