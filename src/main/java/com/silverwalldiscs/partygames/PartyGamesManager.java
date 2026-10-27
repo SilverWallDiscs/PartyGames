@@ -994,6 +994,14 @@ public final class PartyGamesManager {
                 .min(java.util.Comparator.comparingDouble(entity -> entity.distanceToSqr(x, y, z)))
                 .orElse(null);
         if (horse != null) {
+            // In current Minecraft versions, equip the saddle through the entity equipment slot
+            // command; the legacy SaddleItem summon tag alone is not reliable.
+            server.getCommands().performPrefixedCommand(
+                    server.createCommandSourceStack()
+                            .withLevel(eventLevel)
+                            .withPosition(new Vec3(x, y, z))
+                            .withMaximumPermission(PermissionSet.ALL_PERMISSIONS),
+                    "item replace entity @e[type=minecraft:horse,sort=nearest,limit=1] saddle with minecraft:saddle");
             String attributeCommand = "attribute @e[type=minecraft:horse,sort=nearest,limit=1] "
                     + "minecraft:movement_speed base set " + HORSE_MOVE_SPEED;
             server.getCommands().performPrefixedCommand(
