@@ -131,7 +131,7 @@ public final class PartyGamesMod implements ModInitializer {
                                         String selected = StringArgumentType.getString(context, "minigame");
                                         if (!manager.isSupportedGameSelection(selected)) {
                                             context.getSource().sendFailure(Component.literal(
-                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Boat Race."));
+                                                    "Unknown PartyGames minigame. Use Dance Floor, Music Chairs, or Horse Race."));
                                             return 0;
                                         }
                                         return manager.startSelectedGame(context.getSource().getServer(), selected, false) ? 1 : 0;
