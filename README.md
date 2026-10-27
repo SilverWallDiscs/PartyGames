@@ -6,7 +6,7 @@ PartyGames is a server-side Fabric mod for recurring SMP minigame events. Player
 
 ## Current status
 
-The available minigames are **Dance Floor** (also selectable as *Music Chairs*) and **Horse Race**:
+The available minigames are **Dance Floor** and **Horse Race**:
 - Automatic events on a configurable interval, plus an admin start command.
 - A purple announcement with a green clickable **[Participate]** button.
 - A dedicated flat **partygames:event** dimension supplied by an always-enabled built-in data pack.
@@ -51,7 +51,6 @@ The dance arena is generated at the origin of **partygames:event**. Horse Race p
 - **/partygames status** — view event state and player counts.
 - **/partygames retrieve** — retrieve pending prize items or queued offline command rewards.
 - **/partygames start** — open Dance Floor registration immediately (operator permission required).
-- **/partygames start Music Chairs** — alias for Dance Floor / musical chairs (operator permission required).
 - **/partygames start Horse Race** — open registration for the schematic-based horse race.
 - Horse Race supports up to 6 riders, places their saddled horses on the lime-wool start line, and gives each horse a different coat pattern with the same base movement speed. Shift-dismount is blocked until results are declared; fallen horses are teleported back above the course. The 5-second private countdown opens the stone-brick/barrier gate at GO. Crossing the oak-wood finish strip under the black-and-white wool flag records the first three places. Touching magenta glazed terracotta grants Speed III for 3 seconds.
 - **/partygames stop** — cancel the current event and return participants (operator permission required).
