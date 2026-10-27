@@ -991,7 +991,7 @@ public final class PartyGamesManager {
     private Entity summonRaceHorse(MinecraftServer server, double x, double y, double z, int variant) {
         String command = "summon minecraft:horse " + x + " " + y + " " + z
                 + " {Tame:1b,Temper:100,Variant:" + variant
-                + ",PersistenceRequired:1b,Invulnerable:1b,Saddle:1b,SaddleItem:{id:\"minecraft:saddle\",count:1}}";
+                + ",PersistenceRequired:1b,Invulnerable:1b}";
         server.getCommands().performPrefixedCommand(
                 server.createCommandSourceStack()
                         .withLevel(eventLevel)
