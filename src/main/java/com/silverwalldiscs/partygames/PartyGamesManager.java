@@ -870,6 +870,8 @@ public final class PartyGamesManager {
         horseRaceLastSafePositions.put(uuid, safe);
         horseRaceLastX.put(uuid, safe.x);
         horseRaceLastZ.put(uuid, safe.z);
+        player.setDeltaMovement(Vec3.ZERO);
+        player.resetFallDistance();
         player.sendSystemMessage(Component.literal("You were returned safely to the Horse Race course.")
                 .withStyle(ChatFormatting.YELLOW));
     }
@@ -1326,6 +1328,8 @@ public final class PartyGamesManager {
                     horse.teleportTo(eventLevel, lastSafe.x, lastSafe.y, lastSafe.z, Set.of(), 180.0F, 0.0F, true);
                     horse.setDeltaMovement(Vec3.ZERO);
                     horse.resetFallDistance();
+                    player.setDeltaMovement(Vec3.ZERO);
+                    player.resetFallDistance();
                     horseRaceLastX.put(uuid, lastSafe.x);
                     horseRaceLastZ.put(uuid, lastSafe.z);
                     player.sendSystemMessage(Component.literal("Your horse fell and was teleported back above the track.")
