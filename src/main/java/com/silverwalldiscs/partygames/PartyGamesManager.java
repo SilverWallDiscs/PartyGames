@@ -262,7 +262,7 @@ public final class PartyGamesManager {
                 + " | joined: " + joinedPlayers.size()
                 + " | alive: " + alivePlayers.size()
                 + " | completed dance rounds: " + completedRounds
-                + (activeMinigame == Minigame.HORSE_RACE ? " | boats finished: " + raceFinishOrder.size() : "");
+                + (activeMinigame == Minigame.HORSE_RACE ? " | horses finished: " + raceFinishOrder.size() : "");
     }
 
     public boolean isSupportedGameSelection(String selection) {
