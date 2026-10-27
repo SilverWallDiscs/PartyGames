@@ -8,7 +8,7 @@
     "ProtectedCommandsMixin",
     "ProtectedDropsMixin",
     "ProtectedContainerDropMixin",
-    "RaceBoatPhysicsMixin"
+    "HorseRaceDismountMixin"
   ],
   "injectors": {
     "defaultRequire": 1
