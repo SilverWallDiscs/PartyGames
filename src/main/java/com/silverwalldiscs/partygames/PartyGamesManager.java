@@ -284,7 +284,7 @@ public final class PartyGamesManager {
             case "dance floor", "music chair", "music chairs", "musical chairs", "musical chair",
                     "dance", "chairs", "chair" -> Minigame.DANCE_FLOOR;
             case "horse race", "horse racing", "horse", "race", "racing", "carrera de caballos",
-                    "caballos", "boat race", "boat" -> Minigame.HORSE_RACE;
+                    "caballos" -> Minigame.HORSE_RACE;
             default -> null;
         };
     }
