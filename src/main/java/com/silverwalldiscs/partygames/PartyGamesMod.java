@@ -97,7 +97,7 @@ public final class PartyGamesMod implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) ->
                 manager.onPlayerDisconnect(server, handler.player));
 
-        LOGGER.info("PartyGames loaded. The first minigame is Dance Floor.");
+        LOGGER.info("PartyGames loaded. Available minigames: Dance Floor and Horse Race.");
     }
 
     private void registerCommands() {
@@ -124,7 +124,7 @@ public final class PartyGamesMod implements ModInitializer {
                                     .suggests((context, builder) -> {
                                         builder.suggest("Dance Floor");
                                         builder.suggest("Music Chairs");
-                                        builder.suggest("Boat Race");
+                                        builder.suggest("Horse Race");
                                         return builder.buildFuture();
                                     })
                                     .executes(context -> {
