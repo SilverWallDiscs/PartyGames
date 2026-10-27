@@ -1378,7 +1378,12 @@ public final class PartyGamesManager {
             float forward = player.zza;
             if (Math.abs(forward) > 0.01F) {
                 double yaw = Math.toRadians(player.getYRot());
-                double speed = forward >= 0.0F ? 0.28D : 0.12D;
+                int speedAmplifier = horse instanceof net.minecraft.world.entity.LivingEntity livingHorse
+                        ? livingHorse.getEffect(MobEffects.SPEED) == null ? 2
+                        : livingHorse.getEffect(MobEffects.SPEED).getAmplifier() : 2;
+                double speed = speedAmplifier >= 4
+                        ? (forward >= 0.0F ? 0.42D : 0.18D)
+                        : (forward >= 0.0F ? 0.28D : 0.12D);
                 double vx = -Math.sin(yaw) * speed * Math.abs(forward);
                 double vz = Math.cos(yaw) * speed * Math.abs(forward);
                 Vec3 oldVelocity = horse.getDeltaMovement();
