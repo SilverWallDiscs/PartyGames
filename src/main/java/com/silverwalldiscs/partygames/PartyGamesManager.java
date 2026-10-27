@@ -172,7 +172,6 @@ public final class PartyGamesManager {
     private int nextSpawnIndex;
     private Identifier activeMusicId;
     private boolean arenaPrepared;
-    private boolean raceTrackPrepared;
     private boolean loggedMissingDimension;
     private int countdownValue;
 
@@ -839,21 +838,20 @@ public final class PartyGamesManager {
 
     private void rescueRacer(ServerPlayer player) {
         UUID uuid = player.getUUID();
-        Entity boat = raceHorses.get(uuid);
-        Vec3 start = horseRaceStartPositions.get(uuid);
-        if (eventLevel == null || boat == null || start == null || boat.isRemoved()) {
+        Entity horse = raceHorses.get(uuid);
+        Vec3 start = horseRaceLastSafePositions.getOrDefault(uuid, horseRaceStartPositions.get(uuid));
+        if (eventLevel == null || horse == null || start == null || horse.isRemoved()) {
             returnPlayer(player.level().getServer(), player);
             return;
         }
-        boat.setDeltaMovement(Vec3.ZERO);
-        boat.setPos(start.x, start.y, start.z);
-        player.stopRiding();
-        player.teleportTo(eventLevel, start.x, start.y, start.z, Set.of(), -90.0F, 0.0F, true);
-        player.startRiding(boat, true, true);
+        // Rescue the mount without attempting to dismount the participant; shift-dismount
+        // remains blocked for the entire race lifecycle.
+        horse.teleportTo(eventLevel, start.x, start.y, start.z, Set.of(), 180.0F, 0.0F, true);
+        horse.setDeltaMovement(Vec3.ZERO);
+        horse.resetFallDistance();
         horseRaceLastX.put(uuid, start.x);
         horseRaceLastZ.put(uuid, start.z);
-        horseRaceDistance.put(uuid, 0.0D);
-        player.sendSystemMessage(Component.literal("You fell off the course and were returned to your starting line.")
+        player.sendSystemMessage(Component.literal("Your horse fell; it was moved back above the course.")
                 .withStyle(ChatFormatting.YELLOW));
     }
 
@@ -1303,14 +1301,15 @@ public final class PartyGamesManager {
             if (horse.getY() >= RACE_TRACK_ORIGIN_Y + 1.0D && !eventLevel.getBlockState(under).isAir()) {
                 horseRaceLastSafePositions.put(uuid, new Vec3(horse.getX(), horse.getY(), horse.getZ()));
             }
-            if (horse.getY() < RACE_TRACK_ORIGIN_Y + 1.0D) {
-                Vec3 rescue = horseRaceLastSafePositions.getOrDefault(uuid, horseRaceStartPositions.get(uuid));
-                if (rescue != null) {
-                    horse.teleportTo(eventLevel, rescue.x, rescue.y, rescue.z, Set.of(), 180.0F, 0.0F, true);
+            Vec3 lastSafe = horseRaceLastSafePositions.getOrDefault(uuid, horseRaceStartPositions.get(uuid));
+            if (horse.getY() < RACE_TRACK_ORIGIN_Y + 1.0D
+                    || (lastSafe != null && horse.getY() < lastSafe.y - 2.0D)) {
+                if (lastSafe != null) {
+                    horse.teleportTo(eventLevel, lastSafe.x, lastSafe.y, lastSafe.z, Set.of(), 180.0F, 0.0F, true);
                     horse.setDeltaMovement(Vec3.ZERO);
                     horse.resetFallDistance();
-                    horseRaceLastX.put(uuid, rescue.x);
-                    horseRaceLastZ.put(uuid, rescue.z);
+                    horseRaceLastX.put(uuid, lastSafe.x);
+                    horseRaceLastZ.put(uuid, lastSafe.z);
                     player.sendSystemMessage(Component.literal("Your horse fell and was teleported back above the track.")
                             .withStyle(ChatFormatting.YELLOW));
                 }
