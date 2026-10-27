@@ -1,6 +1,6 @@
 # PartyGames
 
-**Current version: 0.2.1**
+**Current version: 0.2.2**
 
 PartyGames is a server-side Fabric mod for recurring SMP minigame events. Players join from a clickable chat announcement, are sent to a protected event dimension, compete, and receive configurable rewards.
 
